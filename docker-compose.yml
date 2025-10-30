@@ -1,0 +1,18 @@
+services:
+
+  app:
+    build:
+      context: .
+    container_name: brick-scanr-backend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./logs:/root/logs
+      - ./config:/root/config
+    networks: # Networks to join (Services on the same network can communicate with each other using their name)
+      - brick-scanr-backend
+    
+networks:
+  brick-scanr-backend:
+    driver: bridge
