@@ -42,14 +42,14 @@ endif
 swagger: swagger-init swagger-ui swagger-gen
 
 swagger-init:
-	swag init -d cmd/api,internal -ot yaml
+	swag init -ot yaml
 
 swagger-ui:
 	docker run --rm -d -p $(SWAGGER_UI_PORT):8080 -e SWAGGER_JSON=/tmp/swagger.yaml -v `pwd`/docs:/tmp swaggerapi/swagger-ui
 	@echo "Swagger UI is available at http://localhost:$(SWAGGER_UI_PORT)"
 
 swagger-gen:
-	docker run --rm -v `pwd`:/local openapitools/openapi-generator-cli:v7.11.0 generate -i /local/docs/swagger.yaml -g typescript-angular -o /local/docs/angular
+	docker run --rm -v `pwd`:/local openapitools/openapi-generator-cli:latest generate -i /local/docs/swagger.yaml -g typescript-angular -o /local/docs/angular
 
 # Help command to display usage
 help:

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Zapharaos/brick-scanr-backend/internal/handlers"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -52,6 +53,10 @@ func New() *Router {
 
 	r.Route("/api/v1", func(r chi.Router) {
 
+		r.Route("/set", func(r chi.Router) {
+			r.Get("/search/{query}", handlers.SearchSets)
+			r.Get("/inventory/{id}/{setNumber}", handlers.GetSetInventory)
+		})
 	})
 
 	return router
