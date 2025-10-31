@@ -53,7 +53,7 @@ func (rs *RuntimeSet) Start() {
 	go rs.run()
 }
 
-// PushChange pushes a data change to the event
+// PushChange pushes a data change to the runtime set
 func (rs *RuntimeSet) PushChange(change dataChange) {
 	rs.changeChan <- change
 }
@@ -181,7 +181,6 @@ func (rs *RuntimeSet) handle(msg clientMessage) {
 	if err != nil {
 		zap.L().Error("Failed to unmarshal packet", zap.Error(err))
 		// todo: do we close cli connection here ?
-		// Issue URL: https://github.com/SchawnnDev/caisse-back/issues/34
 		return
 	}
 
@@ -193,12 +192,14 @@ func (rs *RuntimeSet) handle(msg clientMessage) {
 	// then we need to check the type of packet
 	switch p.Type {
 
+	// TODO : case client update ?
+
 	case PacketTypeClientDisconnect:
 		// TODO : clear set ?
 	}
 }
 
-// checkForChanges checks for changes in the event, like item quantity changes, etc.
+// checkForChanges checks for changes in the runtime set, like images, inventory, prices etc.
 func (rs *RuntimeSet) checkForChanges() {
 	// TODO : implement
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/app"
 	"github.com/Zapharaos/brick-scanr-backend/internal/router"
+	"github.com/Zapharaos/brick-scanr-backend/internal/setruntime"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
@@ -27,9 +28,9 @@ var (
 //	@description	BrickScanr API Swagger
 //	@termsOfService	http://swagger.io/terms/
 
-//	@contact.name	SchawnnDev
-//	@contact.url	https://schawnndev.fr
-//	@contact.email	contact@schawnndev.fr
+//	@contact.name	Zapharaos
+//	@contact.url	https://matthieu-freitag.com
+//	@contact.email	contact@matthieu-freitag.com
 
 //	@host	localhost:3000
 
@@ -39,9 +40,9 @@ var (
 func main() {
 	app.Init(Version, BuildDate)
 
-	_, cancel := context.WithCancel(context.Background())
-
-	r := router.New()
+	ctx, cancel := context.WithCancel(context.Background())
+	setHandler := setruntime.NewHandler(ctx)
+	r := router.New(setHandler)
 
 	// Get server configuration from config
 	host := viper.GetString("server.host")
@@ -79,6 +80,8 @@ func main() {
 	if err := srv.Shutdown(context.Background()); err != nil {
 		zap.L().Fatal("Server shutdown failed", zap.Error(err))
 	}
+
+	setHandler.Shutdown()
 
 	zap.L().Info("Server shutdown")
 }

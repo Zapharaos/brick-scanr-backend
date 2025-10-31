@@ -40,12 +40,12 @@ func NewHandler(ctx context.Context) *Handler {
 	}
 }
 
-// RunSet runs a set, if it is not already running
+// RunSet runs a runtime set, if it is not already running
 func (h *Handler) RunSet(set set.Set) *RuntimeSet {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
-	// First check if the set is already running
+	// First check if the runtime set is already running
 	if rs, ok := h.sets[set.Id]; ok {
 		return rs
 	}
@@ -53,13 +53,13 @@ func (h *Handler) RunSet(set set.Set) *RuntimeSet {
 	// Create a new runtime set
 	rs := NewRuntimeSet(set, RuntimeOptionsFromConfig(), h.wg, h.ErrorLogger)
 
-	// Set the set end callback
+	// Set the runtime set end callback
 	rs.onEnd = h.onSetEnd
 
 	// Start the set
 	rs.Start()
 
-	// Add the set to the handler
+	// Add the runtime set to the handler
 	h.sets[set.Id] = rs
 
 	return rs
@@ -81,7 +81,7 @@ func (h *Handler) RemoveSet(id uuid.UUID) {
 	delete(h.sets, id)
 }
 
-// PushChange pushes a change to the set, if it exists
+// PushChange pushes a change to the runtime set, if it exists
 func (h *Handler) PushChange(setId, changedId, changedParentId uuid.UUID, dType DataType, reason DataChangeReason) {
 	if rs := h.GetSet(setId); rs != nil {
 		rs.PushChange(dataChange{
@@ -93,7 +93,7 @@ func (h *Handler) PushChange(setId, changedId, changedParentId uuid.UUID, dType 
 	}
 }
 
-// StopSet stops a specific running set cleanly
+// StopSet stops a specific running runtime set cleanly
 func (h *Handler) StopSet(id uuid.UUID) bool {
 	h.mutex.RLock()
 	defer h.mutex.RUnlock()
@@ -107,7 +107,7 @@ func (h *Handler) StopSet(id uuid.UUID) bool {
 	case s.done <- struct{}{}:
 		return true
 	default:
-		// Channel is full or closed, set might already be stopping
+		// Channel is full or closed, runtime set might already be stopping
 		return false
 	}
 }
@@ -128,12 +128,12 @@ func (h *Handler) Shutdown() {
 	h.wg.Wait()
 }
 
-// IsSetRunning checks if a set is running
+// IsSetRunning checks if a runtime set is running
 func (h *Handler) IsSetRunning(id uuid.UUID) bool {
 	return h.GetSet(id) != nil
 }
 
-// onSetEnd is called when a set ends
+// onSetEnd is called when a runtime set ends
 func (h *Handler) onSetEnd(id uuid.UUID) {
 	h.RemoveSet(id)
 }

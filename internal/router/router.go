@@ -7,6 +7,7 @@ import (
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/handlers"
 	"github.com/Zapharaos/brick-scanr-backend/internal/jobs"
+	"github.com/Zapharaos/brick-scanr-backend/internal/setruntime"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -15,10 +16,11 @@ import (
 )
 
 type Router struct {
-	Router *chi.Mux
+	Router  *chi.Mux
+	handler *setruntime.Handler
 }
 
-func New() *Router {
+func New(setHandler *setruntime.Handler) *Router {
 	r := chi.NewRouter()
 
 	// A good base middleware stack
@@ -49,7 +51,8 @@ func New() *Router {
 	}
 
 	router := &Router{
-		Router: r,
+		Router:  r,
+		handler: setHandler,
 	}
 
 	r.Route("/api/v1", func(r chi.Router) {
@@ -61,6 +64,9 @@ func New() *Router {
 			r.Post("/details/{id}/{setNumber}", handlers.StartSetDetailsJob)
 			r.Get("/websocket", jobs.HandleWebSocket)
 			r.Get("/job/{job_id}", handlers.GetSetDetailsJob)
+
+			// TODO : enable websocket
+			// r.HandleFunc("/details/ws", router.handler.HandleSetDetailsWebSocket)
 		})
 	})
 
