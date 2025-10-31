@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/handlers"
+	"github.com/Zapharaos/brick-scanr-backend/internal/jobs"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -55,7 +56,11 @@ func New() *Router {
 
 		r.Route("/set", func(r chi.Router) {
 			r.Get("/search/{query}", handlers.SearchSets)
-			r.Get("/inventory/{id}/{setNumber}", handlers.GetSetInventory)
+
+			// New job-based endpoints
+			r.Post("/details/{id}/{setNumber}", handlers.StartSetDetailsJob)
+			r.Get("/websocket", jobs.HandleWebSocket)
+			r.Get("/job/{job_id}", handlers.GetSetDetailsJob)
 		})
 	})
 
