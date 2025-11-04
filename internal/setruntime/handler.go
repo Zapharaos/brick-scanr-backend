@@ -54,7 +54,7 @@ func (h *Handler) RunSet(set set.Set) *RuntimeSet {
 	rs := NewRuntimeSet(set, RuntimeOptionsFromConfig(), h.wg, h.ErrorLogger)
 
 	// Set the runtime set end callback
-	rs.onEnd = h.onSetEnd
+	rs.onEnd = h.onRuntimeSetEnd
 
 	// Start the set
 	rs.Start()
@@ -65,16 +65,16 @@ func (h *Handler) RunSet(set set.Set) *RuntimeSet {
 	return rs
 }
 
-// GetSet gets a runtime set from the handler
-func (h *Handler) GetSet(id uuid.UUID) *RuntimeSet {
+// GetRuntimeSet gets a runtime set from the handler
+func (h *Handler) GetRuntimeSet(id uuid.UUID) *RuntimeSet {
 	h.mutex.RLock()
 	defer h.mutex.RUnlock()
 
 	return h.sets[id]
 }
 
-// RemoveSet removes a runtime set from the handler
-func (h *Handler) RemoveSet(id uuid.UUID) {
+// RemoveRuntimeSet removes a runtime set from the handler
+func (h *Handler) RemoveRuntimeSet(id uuid.UUID) {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
@@ -83,7 +83,7 @@ func (h *Handler) RemoveSet(id uuid.UUID) {
 
 // PushChange pushes a change to the runtime set, if it exists
 func (h *Handler) PushChange(setId, changedId, changedParentId uuid.UUID, dType DataType, reason DataChangeReason) {
-	if rs := h.GetSet(setId); rs != nil {
+	if rs := h.GetRuntimeSet(setId); rs != nil {
 		rs.PushChange(dataChange{
 			Id:       changedId,
 			ParentId: changedParentId,
@@ -93,8 +93,8 @@ func (h *Handler) PushChange(setId, changedId, changedParentId uuid.UUID, dType 
 	}
 }
 
-// StopSet stops a specific running runtime set cleanly
-func (h *Handler) StopSet(id uuid.UUID) bool {
+// StopRuntimeSet stops a specific running runtime set cleanly
+func (h *Handler) StopRuntimeSet(id uuid.UUID) bool {
 	h.mutex.RLock()
 	defer h.mutex.RUnlock()
 	s, exists := h.sets[id]
@@ -130,10 +130,10 @@ func (h *Handler) Shutdown() {
 
 // IsSetRunning checks if a runtime set is running
 func (h *Handler) IsSetRunning(id uuid.UUID) bool {
-	return h.GetSet(id) != nil
+	return h.GetRuntimeSet(id) != nil
 }
 
-// onSetEnd is called when a runtime set ends
-func (h *Handler) onSetEnd(id uuid.UUID) {
-	h.RemoveSet(id)
+// onRuntimeSetEnd is called when a runtime set ends
+func (h *Handler) onRuntimeSetEnd(id uuid.UUID) {
+	h.RemoveRuntimeSet(id)
 }

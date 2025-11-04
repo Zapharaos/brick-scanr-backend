@@ -1,8 +1,8 @@
 package app
 
 import (
+	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
 	"github.com/Zapharaos/brick-scanr-backend/internal/jobs"
-	"github.com/Zapharaos/brick-scanr-backend/internal/set"
 	"github.com/Zapharaos/brick-scanr-backend/internal/utils"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -23,9 +23,9 @@ func Init(version, buildDate string) {
 
 // InitServices initializes all handler services
 func initServices() {
-	// Create global job manager
-	jobManager := jobs.NewManager()
+	// Initialize global job manager singleton
+	jobs.ReplaceGlobalManager(jobs.NewManager())
 
-	// Initialize set service
-	set.ReplaceGlobals(set.NewService(jobManager))
+	// Initialize global bricklink client singleton
+	bricklink.ReplaceGlobalClient(bricklink.NewClient())
 }

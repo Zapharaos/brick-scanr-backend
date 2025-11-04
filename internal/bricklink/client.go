@@ -18,3 +18,20 @@ func NewClient() *Client {
 		},
 	}
 }
+
+var _globalClient *Client
+
+// C is used to access the global Client singleton
+func C() *Client {
+	if _globalClient == nil {
+		_globalClient = NewClient()
+	}
+	return _globalClient
+}
+
+// ReplaceGlobalClient affects a new client to the global client singleton
+func ReplaceGlobalClient(client *Client) func() {
+	prev := _globalClient
+	_globalClient = client
+	return func() { ReplaceGlobalClient(prev) }
+}

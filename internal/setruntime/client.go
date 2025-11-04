@@ -37,7 +37,7 @@ type clientMessage struct {
 }
 
 type client struct {
-	jobId uuid.UUID
+	userId uuid.UUID
 
 	send chan []byte
 
@@ -52,13 +52,13 @@ type client struct {
 	mutex                   sync.RWMutex
 }
 
-func NewClient(rs *RuntimeSet, conn *websocket.Conn, jobId uuid.UUID) Client {
+func NewClient(rs *RuntimeSet, conn *websocket.Conn, userId uuid.UUID) Client {
 	cli := &client{
 		send:         make(chan []byte, sendChannelBufferSize),
 		done:         make(chan struct{}),
 		conn:         conn,
 		rs:           rs,
-		jobId:        jobId,
+		userId:       userId,
 		lastActivity: time.Now(),
 		mutex:        sync.RWMutex{},
 	}
@@ -148,7 +148,7 @@ func (c *client) startReadPolling() {
 
 // ID returns the client's ID
 func (c *client) ID() uuid.UUID {
-	return c.jobId
+	return c.userId
 }
 
 // LastActivity returns the last time the client was active
@@ -178,13 +178,13 @@ func (c *client) Send(message string) {
 
 		// Log and check if we should disconnect
 		zap.L().Warn("Client send channel blocked, dropping message",
-			zap.String("client_id", c.jobId.String()),
+			zap.String("client_id", c.userId.String()),
 			zap.Int("consecutive_failures", failures))
 
 		// If too many consecutive failures, the client is likely disconnected
 		if failures >= maxConsecutiveSendFailures {
 			zap.L().Warn("Too many consecutive send failures, closing client connection",
-				zap.String("client_id", c.jobId.String()),
+				zap.String("client_id", c.userId.String()),
 				zap.Int("failures", failures))
 			c.close()
 		}
@@ -216,13 +216,13 @@ func (c *client) SendPacket(packet Packet) {
 
 		// Log and check if we should disconnect
 		zap.L().Warn("Client send channel blocked, dropping packet",
-			zap.String("client_id", c.jobId.String()),
+			zap.String("client_id", c.userId.String()),
 			zap.Int("consecutive_failures", failures))
 
 		// If too many consecutive failures, the client is likely disconnected
 		if failures >= maxConsecutiveSendFailures {
 			zap.L().Warn("Too many consecutive send failures, closing client connection",
-				zap.String("client_id", c.jobId.String()),
+				zap.String("client_id", c.userId.String()),
 				zap.Int("failures", failures))
 			c.close()
 		}

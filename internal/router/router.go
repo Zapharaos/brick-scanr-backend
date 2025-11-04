@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/handlers"
-	"github.com/Zapharaos/brick-scanr-backend/internal/jobs"
 	"github.com/Zapharaos/brick-scanr-backend/internal/setruntime"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -17,7 +16,7 @@ import (
 
 type Router struct {
 	Router  *chi.Mux
-	handler *setruntime.Handler
+	handler *handlers.Handler
 }
 
 func New(setHandler *setruntime.Handler) *Router {
@@ -52,7 +51,7 @@ func New(setHandler *setruntime.Handler) *Router {
 
 	router := &Router{
 		Router:  r,
-		handler: setHandler,
+		handler: handlers.NewHandler(setHandler),
 	}
 
 	r.Route("/api/v1", func(r chi.Router) {
@@ -60,13 +59,9 @@ func New(setHandler *setruntime.Handler) *Router {
 		r.Route("/set", func(r chi.Router) {
 			r.Get("/search/{query}", handlers.SearchSets)
 
-			// New job-based endpoints
-			r.Post("/details/{id}/{setNumber}", handlers.StartSetDetailsJob)
-			r.Get("/websocket", jobs.HandleWebSocket)
-			r.Get("/job/{job_id}", handlers.GetSetDetailsJob)
-
-			// TODO : enable websocket
-			// r.HandleFunc("/details/ws", router.handler.HandleSetDetailsWebSocket)
+			// Details
+			r.Post("/details/{id}/{setNumber}", router.handler.FetchSetDetails)
+			r.Get("/details/job/{id}/ws", router.handler.SetDetailsJobWebSocket)
 		})
 	})
 

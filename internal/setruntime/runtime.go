@@ -211,6 +211,8 @@ func (rs *RuntimeSet) handleDataChange(change dataChange) {
 		rs.handleDataChangeCreated(change)
 	case DataTypeUpdated:
 		rs.handleDataChangeUpdated(change)
+	case DataTypeCompleted:
+		rs.handleDataChangeCompleted(change)
 	}
 }
 

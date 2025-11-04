@@ -10,11 +10,14 @@ type DataChangeReason uint8
 
 const (
 	DataTypeSet DataType = iota
+	DataTypeSetInventory
+	DataTypeSetInventoryPrices
 )
 
 const (
 	DataTypeCreated DataChangeReason = iota
 	DataTypeUpdated
+	DataTypeCompleted
 )
 
 type dataChange struct {
@@ -30,6 +33,10 @@ func (rs *RuntimeSet) handleDataChangeCreated(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
 		break
+	case DataTypeSetInventory:
+		break
+	case DataTypeSetInventoryPrices:
+		break
 	default:
 		break
 	}
@@ -39,7 +46,22 @@ func (rs *RuntimeSet) handleDataChangeCreated(change dataChange) {
 func (rs *RuntimeSet) handleDataChangeUpdated(change dataChange) {
 	// TODO : implement
 	switch change.Type {
+	case DataTypeSetInventoryPrices:
+		break
+	default:
+		break
+	}
+}
+
+// handleDataChangeCompleted handles the data completion
+func (rs *RuntimeSet) handleDataChangeCompleted(change dataChange) {
+	// TODO : implement
+	switch change.Type {
 	case DataTypeSet:
+		break
+	case DataTypeSetInventory:
+		break
+	case DataTypeSetInventoryPrices:
 		break
 	default:
 		break
