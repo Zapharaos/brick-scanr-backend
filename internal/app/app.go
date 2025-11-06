@@ -1,8 +1,10 @@
 package app
 
 import (
+	"time"
+
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
-	"github.com/Zapharaos/brick-scanr-backend/internal/jobs"
+	"github.com/Zapharaos/brick-scanr-backend/internal/database"
 	"github.com/Zapharaos/brick-scanr-backend/internal/utils"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -18,14 +20,17 @@ func Init(version, buildDate string) {
 	zap.L().Info("Starting BrickScanr API", zap.String("version", version), zap.String("build_date", buildDate))
 
 	utils.RunInitWithTime(utils.InitDate, "Initializing Date")
+	utils.RunInitWithTime(InitRedis, "Initializing Redis")
 	utils.RunInitWithTime(initServices, "Initializing Services")
+
+	// Start databases health monitoring
+	database.StartHealthMonitoring("Redis", 30*time.Second, database.DB().Redis(), func() {
+		utils.RunInitWithTime(InitRedis, "Health checkup - Initializing Redis")
+	})
 }
 
 // InitServices initializes all handler services
 func initServices() {
-	// Initialize global job manager singleton
-	jobs.ReplaceGlobalManager(jobs.NewManager())
-
 	// Initialize global bricklink client singleton
 	bricklink.ReplaceGlobalClient(bricklink.NewClient())
 }

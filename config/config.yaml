@@ -1,3 +1,25 @@
+# Redis configuration
+redis:
+  # Specify the Redis host
+  # Default value: "redis"
+  host: "redis"
+
+  # Specify the Redis port
+  # Default value: "6379"
+  port: 6379
+
+  # Specify the Redis password
+  # Default value: ""
+  password: ""
+
+  # Specify the Redis database number
+  # Default value: "0"
+  db: 0
+
+  # Specify the maximum number of connections in the Redis connection pool
+  # Default value: "10"
+  pool_size: 10
+
 # Server configuration
 server:
   # Specify the server host
@@ -79,3 +101,41 @@ cors:
   # Maximum age in seconds
   # Default value: 300
   max_age: 300
+
+# Set runtime configuration
+setruntime:
+  # Channel capacity for client connections
+  # Default value: 100
+  client_chan_cap: 100
+
+  # Channel capacity for receiving messages
+  # Default value: 100
+  receive_chan_cap: 100
+
+  # Channel capacity for data changes
+  # Default value: 20
+  change_chan_cap: 20
+
+  # Channel capacity for commands
+  # Default value: 20
+  command_chan_cap: 20
+
+  # Event timeout duration (how long event stays active without activity)
+  # Expressed as a Golang duration
+  # Default value: "30m"
+  timeout: "30m"
+
+  # Client timeout duration (how long client stays connected without activity)
+  # Expressed as a Golang duration
+  # Default value: "10m"
+  client_timeout: "10m"
+
+  # Frequency of client timeout checks
+  # Expressed as a Golang duration
+  # Default value: "30s"
+  client_timeout_check_freq: "30s"
+
+  # Frequency of set changes checks
+  # Expressed as a Golang duration
+  # Default value: "30s"
+  set_change_check_freq: "30s"

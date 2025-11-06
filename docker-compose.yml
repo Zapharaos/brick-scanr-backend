@@ -10,9 +10,37 @@ services:
     volumes:
       - ./logs:/root/logs
       - ./config:/root/config
-    networks: # Networks to join (Services on the same network can communicate with each other using their name)
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
       - brick-scanr-backend
-    
+
+  redis:
+    image: redis:latest
+    container_name: brick-scanr-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    env_file:
+      - .env
+    environment:
+      - REDIS_PASSWORD=${BRICK_SCANR_REDIS_PASSWORD:-changeme123!}
+    volumes:
+      - redis-data:/data
+    networks:
+      - brick-scanr-backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${BRICK_SCANR_REDIS_PASSWORD:-changeme123!}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  redis-data:
+
 networks:
   brick-scanr-backend:
     driver: bridge
