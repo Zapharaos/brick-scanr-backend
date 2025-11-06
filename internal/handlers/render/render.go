@@ -83,6 +83,11 @@ func NotFound(w http.ResponseWriter, r *http.Request, err error) {
 	JSON(w, r, resp)
 }
 
+func Accepted(w http.ResponseWriter, r *http.Request, data interface{}) {
+	w.WriteHeader(http.StatusAccepted)
+	JSON(w, r, data)
+}
+
 // Count returns an HTTP status 200 with a JSON object containing the count (CountResponse)
 func Count(w http.ResponseWriter, r *http.Request, count int64) {
 	JSON(w, r, CountResponse{Count: count})

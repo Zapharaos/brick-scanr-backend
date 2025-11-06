@@ -1,8 +1,10 @@
 package setruntime
 
 import (
+	"context"
+
+	"github.com/Zapharaos/brick-scanr-backend/internal/set"
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 )
 
 type DataType uint8
@@ -18,24 +20,26 @@ const (
 	DataTypeCreated DataChangeReason = iota
 	DataTypeUpdated
 	DataTypeCompleted
+	DataTypeFailed
 )
 
 type dataChange struct {
-	Id       uuid.UUID
-	ParentId uuid.UUID
-	Type     DataType
-	Reason   DataChangeReason
+	Id     uuid.UUID
+	Type   DataType
+	Reason DataChangeReason
 }
 
 // handleDataChangeCreated handles the creation of data
 func (rs *RuntimeSet) handleDataChangeCreated(change dataChange) {
-	// TODO : implement
 	switch change.Type {
 	case DataTypeSet:
+		rs.refreshSet(change.Id)
 		break
 	case DataTypeSetInventory:
+		rs.set.FetchStatus = set.FetchStatusFetchingInventory
 		break
 	case DataTypeSetInventoryPrices:
+		rs.set.FetchStatus = set.FetchStatusFetchingInventoryPrices
 		break
 	default:
 		break
@@ -44,9 +48,9 @@ func (rs *RuntimeSet) handleDataChangeCreated(change dataChange) {
 
 // handleDataChangeUpdated handles the update of data
 func (rs *RuntimeSet) handleDataChangeUpdated(change dataChange) {
-	// TODO : implement
 	switch change.Type {
 	case DataTypeSetInventoryPrices:
+		rs.refreshSet(change.Id)
 		break
 	default:
 		break
@@ -55,24 +59,32 @@ func (rs *RuntimeSet) handleDataChangeUpdated(change dataChange) {
 
 // handleDataChangeCompleted handles the data completion
 func (rs *RuntimeSet) handleDataChangeCompleted(change dataChange) {
-	// TODO : implement
 	switch change.Type {
 	case DataTypeSet:
+		rs.refreshSet(change.Id)
+		rs.set.FetchStatus = set.FetchStatusCompleted
 		break
 	case DataTypeSetInventory:
+		rs.refreshSet(change.Id)
 		break
 	case DataTypeSetInventoryPrices:
+		rs.refreshSet(change.Id)
 		break
 	default:
 		break
 	}
 }
 
-// RError returns the value and if it was found or not, and logs the error if it exists
-func RError[T any](t T, found bool, err error) (T, bool) {
+// handleDataChangeFailed handles the data failure
+func (rs *RuntimeSet) handleDataChangeFailed(change dataChange) {
+	rs.set.FetchStatus = set.FetchStatusFailed
+}
+
+// refreshSet refreshes the set data from Redis
+func (rs *RuntimeSet) refreshSet(setId uuid.UUID) {
+	cachedSet, err := set.GetRedisSet(context.Background(), setId)
 	if err != nil {
-		zap.L().Error("Error while loading changed data", zap.Error(err))
-		return t, false
+		return
 	}
-	return t, found
+	rs.set = cachedSet
 }

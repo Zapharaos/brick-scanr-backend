@@ -29,8 +29,8 @@ func NewHandler(ctx context.Context) *Handler {
 		sets:           make(map[uuid.UUID]*RuntimeSet),
 		mutex:          sync.RWMutex{},
 		wg:             &sync.WaitGroup{},
-		clientChanCap:  100, // todo make configurable
-		receiveChanCap: 100, // todo make configurable
+		clientChanCap:  100,
+		receiveChanCap: 100,
 		Upgrader: &websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true
@@ -46,7 +46,7 @@ func (h *Handler) RunSet(set set.Set) *RuntimeSet {
 	defer h.mutex.Unlock()
 
 	// First check if the runtime set is already running
-	if rs, ok := h.sets[set.Id]; ok {
+	if rs, ok := h.FindRuntimeSetBySetId(set.Id); ok {
 		return rs
 	}
 
@@ -60,7 +60,7 @@ func (h *Handler) RunSet(set set.Set) *RuntimeSet {
 	rs.Start()
 
 	// Add the runtime set to the handler
-	h.sets[set.Id] = rs
+	h.sets[rs.ID] = rs
 
 	return rs
 }
@@ -73,6 +73,16 @@ func (h *Handler) GetRuntimeSet(id uuid.UUID) *RuntimeSet {
 	return h.sets[id]
 }
 
+// FindRuntimeSetBySetId finds a runtime set by its set ID
+func (h *Handler) FindRuntimeSetBySetId(setId uuid.UUID) (*RuntimeSet, bool) {
+	for _, rs := range h.sets {
+		if rs.set.Id == setId {
+			return rs, true
+		}
+	}
+	return nil, false
+}
+
 // RemoveRuntimeSet removes a runtime set from the handler
 func (h *Handler) RemoveRuntimeSet(id uuid.UUID) {
 	h.mutex.Lock()
@@ -82,13 +92,12 @@ func (h *Handler) RemoveRuntimeSet(id uuid.UUID) {
 }
 
 // PushChange pushes a change to the runtime set, if it exists
-func (h *Handler) PushChange(setId, changedId, changedParentId uuid.UUID, dType DataType, reason DataChangeReason) {
-	if rs := h.GetRuntimeSet(setId); rs != nil {
+func (h *Handler) PushChange(rsId, changedId uuid.UUID, dType DataType, reason DataChangeReason) {
+	if rs := h.GetRuntimeSet(rsId); rs != nil {
 		rs.PushChange(dataChange{
-			Id:       changedId,
-			ParentId: changedParentId,
-			Type:     dType,
-			Reason:   reason,
+			Id:     changedId,
+			Type:   dType,
+			Reason: reason,
 		})
 	}
 }

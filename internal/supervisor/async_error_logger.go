@@ -34,7 +34,7 @@ func (l *AsyncErrorLogger) LogError(err set.Error) {
 	}
 }
 
-// TODO : keep? replace with log file?
+// TODO : v2 - keep? replace with log file?
 
 // run is the background goroutine that writes errors to the database.
 func (l *AsyncErrorLogger) run(ctx context.Context) {

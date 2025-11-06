@@ -13,6 +13,7 @@ import (
 )
 
 type RuntimeSet struct {
+	ID  uuid.UUID
 	set set.Set
 	*clientHolder
 	receive    chan clientMessage
@@ -33,6 +34,7 @@ type RuntimeSet struct {
 // NewRuntimeSet creates a new runtime set
 func NewRuntimeSet(s set.Set, opt RuntimeOptions, wg *sync.WaitGroup, errorLogger *supervisor.AsyncErrorLogger) *RuntimeSet {
 	rs := &RuntimeSet{
+		ID:           uuid.New(),
 		set:          s,
 		errorLogger:  errorLogger,
 		opt:          opt,
@@ -106,7 +108,7 @@ func (rs *RuntimeSet) stop() {
 	}
 	rs.clientMutex.RUnlock()
 
-	rs.onEnd(rs.set.Id)
+	rs.onEnd(rs.ID)
 }
 
 // run starts the runtime set
@@ -128,8 +130,6 @@ func (rs *RuntimeSet) run() {
 		rs.stop()
 		rs.wg.Done()
 	}()
-
-	// TODO : init set?
 
 	for {
 		select {
@@ -180,7 +180,7 @@ func (rs *RuntimeSet) handle(msg clientMessage) {
 	err := json.Unmarshal(msg.data, &p)
 	if err != nil {
 		zap.L().Error("Failed to unmarshal packet", zap.Error(err))
-		// todo: do we close cli connection here ?
+		// todo: v2 - do we close cli connection here ?
 		return
 	}
 
@@ -192,16 +192,16 @@ func (rs *RuntimeSet) handle(msg clientMessage) {
 	// then we need to check the type of packet
 	switch p.Type {
 
-	// TODO : case client update ?
+	// TODO : Client - case client update ?
 
 	case PacketTypeClientDisconnect:
-		// TODO : clear set ?
+		// TODO : Client - clear set ?
 	}
 }
 
 // checkForChanges checks for changes in the runtime set, like images, inventory, prices etc.
 func (rs *RuntimeSet) checkForChanges() {
-	// TODO : implement
+	// TODO : Client - implement
 }
 
 // handleDataChange handles a data change
@@ -213,6 +213,8 @@ func (rs *RuntimeSet) handleDataChange(change dataChange) {
 		rs.handleDataChangeUpdated(change)
 	case DataTypeCompleted:
 		rs.handleDataChangeCompleted(change)
+	case DataTypeFailed:
+		rs.handleDataChangeFailed(change)
 	}
 }
 

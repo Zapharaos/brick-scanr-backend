@@ -13,10 +13,10 @@ import (
 )
 
 // FetchInventory fetches the inventory data for a given set number
-func (c *Client) FetchInventory(itemID, setNumber string) (*Inventory, error) {
+func (c *Client) FetchInventory(itemID int, setNumber string) (*Inventory, error) {
 	baseURL := "https://www.bricklink.com/v2/catalog/catalogitem_invtab.page"
 	params := url.Values{}
-	params.Add("idItem", itemID)
+	params.Add("idItem", fmt.Sprintf("%d", itemID))
 	params.Add("st", "1")
 	params.Add("show_invid", "0")
 	params.Add("show_matchcolor", "1")
@@ -115,7 +115,7 @@ func (c *Client) parseItemRow(row *html.Node) InventoryItem {
 		case 3:
 			item.ItemNo = extractItemNo(td)
 		case 4:
-			item.Description, item.Color, item.ColorCode = extractDescription(td)
+			item.Description, item.Color, item.ItemIDs = extractDescription(td)
 		}
 		colIndex++
 	}
@@ -162,8 +162,9 @@ func extractItemNo(td *html.Node) string {
 	return findLink(td)
 }
 
-func extractDescription(td *html.Node) (string, string, string) {
-	var description, color, colorCode string
+func extractDescription(td *html.Node) (string, string, []string) {
+	var description, color string
+	var itemIDs []string
 
 	var traverse func(*html.Node)
 	traverse = func(n *html.Node) {
@@ -176,7 +177,8 @@ func extractDescription(td *html.Node) (string, string, string) {
 					color = parts[0]
 				}
 			} else if n.Data == "span" && hasClass(n, "pciinvPartsColorCode") {
-				colorCode = strings.TrimSpace(getTextContent(n))
+				itemIDstr := strings.TrimSpace(getTextContent(n))
+				itemIDs = parseItemIDs(itemIDstr)
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -185,7 +187,27 @@ func extractDescription(td *html.Node) (string, string, string) {
 	}
 
 	traverse(td)
-	return description, color, colorCode
+	return description, color, itemIDs
+}
+
+// parseItemIDs extracts item IDs from a string like "X or Y or Z"
+func parseItemIDs(itemIDstr string) []string {
+	if itemIDstr == "" {
+		return []string{}
+	}
+
+	// Split by " or " to handle multiple IDs
+	parts := strings.Split(itemIDstr, " or ")
+	ids := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		id := strings.TrimSpace(part)
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+
+	return ids
 }
 
 func hasClass(n *html.Node, className string) bool {

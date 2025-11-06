@@ -26,14 +26,17 @@ type SearchItem struct {
 
 // InventoryItem represents a single item from the BrickLink inventory
 type InventoryItem struct {
-	ItemID      string `json:"item_id"`
-	ItemNo      string `json:"item_no"`
-	Quantity    string `json:"quantity"`
-	Description string `json:"description"`
-	Color       string `json:"color"`
-	ColorCode   string `json:"color_code"`
-	ImageURL    string `json:"image_url"`
-	ItemType    string `json:"item_type"`
+	ItemIDs     []string `json:"item_ids"`
+	ItemNo      string   `json:"item_no"`
+	Quantity    string   `json:"quantity"`
+	Description string   `json:"description"`
+	Color       string   `json:"color"`
+	ImageURL    string   `json:"image_url"`
+}
+
+// HasUniqueItemID checks if the inventory item has exactly one associated Item ID
+func (ii *InventoryItem) HasUniqueItemID() bool {
+	return len(ii.ItemIDs) == 1
 }
 
 // Inventory represents the complete inventory for a set

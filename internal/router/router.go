@@ -60,8 +60,8 @@ func New(setHandler *setruntime.Handler) *Router {
 			r.Get("/search/{query}", handlers.SearchSets)
 
 			// Details
-			r.Post("/details/{id}/{setNumber}", router.handler.FetchSetDetails)
-			r.Get("/details/job/{id}/ws", router.handler.SetDetailsJobWebSocket)
+			r.Post("/details/{id}", router.handler.FetchSetDetails)
+			r.Get("/details/ws/{id}", router.handler.SetDetailsJobWebSocket)
 		})
 	})
 
