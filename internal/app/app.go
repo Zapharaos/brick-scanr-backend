@@ -5,6 +5,7 @@ import (
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
 	"github.com/Zapharaos/brick-scanr-backend/internal/database"
+	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
 	"github.com/Zapharaos/brick-scanr-backend/internal/utils"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -31,6 +32,6 @@ func Init(version, buildDate string) {
 
 // InitServices initializes all handler services
 func initServices() {
-	// Initialize global bricklink client singleton
 	bricklink.ReplaceGlobalClient(bricklink.NewClient())
+	pickabrick.ReplaceGlobalClient(pickabrick.NewClient())
 }

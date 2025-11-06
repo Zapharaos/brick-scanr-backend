@@ -8,6 +8,7 @@ import (
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
 	"github.com/Zapharaos/brick-scanr-backend/internal/handlers/render"
+	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
 	"github.com/Zapharaos/brick-scanr-backend/internal/setruntime"
 	"github.com/go-chi/chi/v5"
@@ -193,7 +194,7 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		// Use background context since request context will be canceled after response is sent
 		ctx := context.Background()
 
-		// Initialize set in Redis
+		// Initialize copy of set inside redis
 		cpRedisSet := bricklinkSet
 
 		// Update in cache
@@ -234,48 +235,48 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 
 		// Push to websocket
 		h.srh.PushChange(rs.ID, setId, setruntime.DataTypeSetInventory, setruntime.DataTypeCompleted)
-
-		// Get unique bricks
-		uniqueBricks := make(map[string]set.Brick)
-		for _, brick := range cpRedisSet.Bricks {
-			if _, exists := uniqueBricks[brick.DesignID]; !exists {
-				uniqueBricks[brick.DesignID] = brick
-			}
-		}
-
-		// Fetch prices
-		totalUnique := len(uniqueBricks)
-		//bricksMap := cpRedisSet.NewBrickMap()
-		currentProgress := 0
-
-		// Push to websocket
 		h.srh.PushChange(rs.ID, setId, setruntime.DataTypeSetInventoryPrices, setruntime.DataTypeCreated)
 
+		// Fetch prices
+		bmap := cpRedisSet.NewBrickMap()
+		currentProgress := 0
+		total := len(bmap.BricksByDesign)
 		// todo : v3 - optimize
-		for _, brick := range uniqueBricks {
+		for designID := range bmap.BricksByDesign {
+			// Fetch bricks by designID
+			results, err := pickabrick.C().FetchBricksByDesignID(string(designID))
+			if err != nil {
+				handleFatalError(setruntime.DataTypeSetInventory, err, "Failed to fetch bricks by designID",
+					zap.String("designID", string(designID)),
+					zap.String("set_id", setId.String()))
+				return
+			}
+
+			// Process results
+			for _, res := range results {
+				brickID := set.BrickID(res.ID)
+				// Try to match the result ID's with the set bricks ID's
+				brick, ok := bmap.GetBrickByID(brickID)
+				if !ok || brick == nil {
+					continue
+				}
+				if brick.Price.CentAmount == 0 || res.Price.CentAmount < brick.Price.CentAmount {
+					brick.MainID = &brickID
+					brick.Price = set.MapPriceFromPickabrick(res.Price)
+				}
+			}
+
 			currentProgress++
 
-			// TODO: Pickabrick - Replace with actual price fetching
-			// price, err := s.bricklinkClient.FetchPickABrickPrice(item.ItemNo)
-
-			// FIXME : fix me price
-
-			_ = brick
-			// Update the brick price in the set
-			/*bricksMap.UpdateBricks(brick.DesignID, func(brick *set.Brick) {
-				brick.Price.Currency = "EUR"
-				brick.Price.CentAmount = 299
-			})*/
-
 			// Update progress every 10 items or on last item
-			if currentProgress%10 == 0 || currentProgress == totalUnique {
+			if currentProgress%10 == 0 || currentProgress == total {
 				// TODO : v2 - use percentages? keep?
-				_ = 25 + ((currentProgress * 75) / totalUnique) // 25-100%
+				_ = 25 + ((currentProgress * 75) / total) // 25-100%
 
 				// Determine current fetch status
 				var fetchStatus set.FetchStatus
 				var changeReason setruntime.DataChangeReason
-				if currentProgress == totalUnique {
+				if currentProgress == total {
 					fetchStatus = set.FetchStatusCompleted
 					changeReason = setruntime.DataTypeCompleted
 				} else {
@@ -302,7 +303,7 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 
 		zap.L().Info("Successfully completed set details job",
 			zap.String("id", setId.String()),
-			zap.Int("unique_items", totalUnique),
+			zap.Int("unique_items", total),
 		)
 	}()
 

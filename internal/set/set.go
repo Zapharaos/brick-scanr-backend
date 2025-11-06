@@ -5,11 +5,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type Price struct {
-	CentAmount int    `json:"cent_amount"`
-	Currency   string `json:"currency"`
-}
-
 type FetchStatus int
 
 const (

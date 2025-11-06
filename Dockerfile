@@ -28,10 +28,10 @@ WORKDIR /root/
 RUN mkdir -p /root/logs
 
 # Copy the binary from the build stage
-COPY --from=build-production /app/bin/brick-scanr-backend .
+COPY --from=build /app/bin/brick-scanr-backend .
 
 # Copy config files from the build stage
-COPY --from=build-production /app/config ./config
+COPY --from=build /app/config ./config
 
 # Create volume for logs
 VOLUME /root/logs
