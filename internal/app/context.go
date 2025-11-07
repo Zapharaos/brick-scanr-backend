@@ -2,4 +2,7 @@ package app
 
 type keyContext string
 
-const ()
+const (
+	ContextKeyLocale   keyContext = "locale"
+	ContextKeyCurrency keyContext = "currency"
+)

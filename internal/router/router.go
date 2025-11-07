@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/handlers"
+	mid "github.com/Zapharaos/brick-scanr-backend/internal/middleware"
 	"github.com/Zapharaos/brick-scanr-backend/internal/setruntime"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -55,6 +56,10 @@ func New(setHandler *setruntime.Handler) *Router {
 	}
 
 	r.Route("/api/v1", func(r chi.Router) {
+
+		// Locale & Currency for all routes
+		r.Use(mid.LocaleMiddleware)
+		r.Use(mid.CurrencyMiddleware)
 
 		r.Route("/set", func(r chi.Router) {
 			r.Get("/search/{query}", handlers.SearchSets)

@@ -65,6 +65,14 @@ logger:
 # Default value: "Europe/Paris"
 timezone: 'Europe/Paris'
 
+# Specify the locale (BCP 47 language.Tag format)
+# Default value: "en-US"
+default_locale: 'en-US'
+
+# Specify the currency (BCP 47 language.Tag format)
+# Default value: "en-US"
+default_currency: 'en-US'
+
 # CORS configuration
 cors:
   # Enable or disable CORS
@@ -93,6 +101,7 @@ cors:
     - "Authorization"
     - "Content-Type"
     - "X-CSRF-Token"
+    - "X-Currency"
 
   # Allow credentials
   # Default value: false

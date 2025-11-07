@@ -21,6 +21,9 @@ func Init(version, buildDate string) {
 	zap.L().Info("Starting BrickScanr API", zap.String("version", version), zap.String("build_date", buildDate))
 
 	utils.RunInitWithTime(utils.InitDate, "Initializing Date")
+	utils.RunInitWithTime(utils.InitLocale, "Initializing Locale")
+	utils.RunInitWithTime(utils.InitCurrency, "Initializing Currency")
+
 	utils.RunInitWithTime(InitRedis, "Initializing Redis")
 	utils.RunInitWithTime(initServices, "Initializing Services")
 

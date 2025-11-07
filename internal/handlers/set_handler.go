@@ -73,6 +73,7 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 
 		// Try to find the set in Redis cache by BrickLink ID
 		// todo : concurrent write/get ? if the same search happens at the same time
+		// todo : v3 - skip cache if not same locale?
 		bricklinkSet, err := set.GetRedisBricklinkSet(r.Context(), fmt.Sprintf("%d", item.BricklinkID))
 		if errors.Is(err, set.ErrKeyNotFound) {
 			// Not found in cache, store it
@@ -131,6 +132,7 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		zap.String("remote_addr", r.RemoteAddr),
 	)
 
+	// todo : v3 - skip cache if not same locale? cache brick separately from set?
 	// Search for cached set data
 	cachedSet, err := set.GetRedisSet(r.Context(), setId)
 	if err != nil {
@@ -178,6 +180,10 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 
 	// Create websocket
 	rs := h.srh.RunSet(bricklinkSet)
+
+	// Extract locale + currency from context
+	locale := GetLocaleFromContext(r)
+	currency := GetCurrencyFromContext(r)
 
 	// Helper to handle fatal errors
 	handleFatalError := func(dataType setruntime.DataType, err error, msg string, fields ...zap.Field) {
@@ -244,7 +250,7 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		// todo : v3 - optimize
 		for designID := range bmap.BricksByDesign {
 			// Fetch bricks by designID
-			results, err := pickabrick.C().FetchBricksByDesignID(string(designID))
+			results, err := pickabrick.C().FetchBricksByDesignID(string(designID), locale, currency)
 			if err != nil {
 				handleFatalError(setruntime.DataTypeSetInventory, err, "Failed to fetch bricks by designID",
 					zap.String("designID", string(designID)),
