@@ -99,6 +99,8 @@ func (rs *RuntimeSet) handleDataChangeProgress(change dataChange) {
 			}
 		}
 
+		// TODO : use in rs ?
+
 		// Determine the batch status
 		var status BatchStatus
 		if change.Type == DataTypeBricklinkBricks {

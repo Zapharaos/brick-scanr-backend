@@ -154,21 +154,23 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 			)
 			break
 		case set.FetchStatusCompleted:
-			// Data is cached and complete, meaning the bricks and prices are available as well
-			// If a brick is missing, it means it was not available at fetch time => check TTL before re-fetching
+			// Data is cached and complete, meaning the bricks and prices should be available
+			// However, bricks might have expired (different TTL) or prices for the requested currency might be missing
 
-			zap.L().Info("Set details found in cache, returning cached data",
+			zap.L().Info("Set details found in cache, checking bricks and prices",
 				zap.String("id", setId.String()),
+				zap.String("currency", currency.String()),
 			)
 
-			bfull := make([]set.Brick, 0)
-			bmissing := make([]set.Brick, 0)
-			pmissing := make([]set.Brick, 0)
+			bfull := make([]set.Brick, 0, len(cachedSet.Bricks))
+			fullbatch := setruntime.Progress{} // For pushing full batch if needed, can be used empty
+			bricksNeedingPrices := make([]set.Brick, 0)
+			needsRefetch := false
 
-			// For each brick, retrieve full data from cache and apply currency
+			// For each brick in the set, retrieve full data from cache and check for missing prices
 			for _, bmin := range cachedSet.Bricks {
 
-				// Retrieve brickID - needed to get the brick from cache - it should not fail
+				// Retrieve brickID - needed to get the brick from cache
 				brickID, err := bmin.GetBrickIDForRedis()
 				if err != nil {
 					zap.L().Error("failed to get brick ID for redis",
@@ -177,42 +179,202 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 
-				// Try to find in cache first
+				// Try to find brick in cache
 				brick, err := set.GetRedisBrick(r.Context(), brickID, bmin.DesignID)
 				if err != nil {
-					// TODO : v2 - shouldn't happen unless TTL expired => re-fetch?
-					bmissing = append(bmissing, bmin)
-					continue
+					// Brick not in cache - likely TTL expired
+					// If brick TTL expired, the set TTL likely expired too
+					// This means we're reading stale set data - trigger a re-fetch
+					zap.L().Warn("Brick cache expired, set data is stale",
+						zap.String("brick_id", string(brickID)),
+						zap.String("design_id", string(bmin.DesignID)),
+						zap.String("set_id", setId.String()),
+					)
+					needsRefetch = true
+					break
 				}
 
-				// Search for the currency price
+				// Check if we have a price for the requested currency
 				if brick.Prices == nil || len(brick.Prices) == 0 {
 					// No prices at all => the product is probably not available for sale anymore
-				} else if price := brick.GetPriceForLocale(currency); price == nil || price.CentAmount == 0 {
-					// TODO : v2 - price missing for currency => re-fetch?
-					pmissing = append(pmissing, bmin)
+					// Include the brick anyway but without a price
+					zap.L().Debug("Brick has no prices available",
+						zap.String("brick_id", string(brickID)),
+						zap.String("design_id", string(bmin.DesignID)),
+					)
+					bfull = append(bfull, brick)
+					fullbatch.AddItem(brick)
 					continue
 				}
 
-				// Apply currency only locally, without caching it
-				brick.ApplyCurrency(currency)
+				// Try to apply the requested currency
+				if !brick.ApplyCurrency(currency) {
+					// Price for this currency not cached - need to fetch it
+					zap.L().Debug("Brick missing price for currency",
+						zap.String("brick_id", string(brickID)),
+						zap.String("design_id", string(bmin.DesignID)),
+						zap.String("currency", currency.String()),
+					)
+					bricksNeedingPrices = append(bricksNeedingPrices, brick)
+				}
+
 				bfull = append(bfull, brick)
+				fullbatch.AddItem(brick)
 			}
 
-			cachedSet.Bricks = bfull
-
-			if len(bmissing) > 0 || len(pmissing) > 0 {
-				zap.L().Warn("Set details incomplete in cache: missing bricks or prices",
+			// If any brick cache expired, trigger a complete re-fetch
+			if needsRefetch {
+				zap.L().Info("Triggering complete re-fetch due to expired brick cache",
 					zap.String("id", setId.String()),
-					zap.Int("bricks_missing_count", len(bmissing)),
-					zap.Int("prices_missing_count", len(pmissing)),
 				)
+				// Don't return here - fall through to start a new fetch below
+				break
 			}
 
-			// For now, we return whatever is cached
+			// If no bricks need price updates, return cached data immediately
+			if len(bricksNeedingPrices) == 0 {
+				zap.L().Info("All bricks have prices for requested currency, returning cached data",
+					zap.String("id", setId.String()),
+					zap.String("currency", currency.String()),
+				)
+				cachedSet.Bricks = bfull
+				render.Accepted(w, r, set.DetailsResponse{
+					Completed: true,
+					Set:       cachedSet,
+				})
+				return
+			}
+
+			// Some bricks need price updates - start a websocket job for fetching prices
+			zap.L().Info("Starting price fetch job for missing currency prices",
+				zap.String("id", setId.String()),
+				zap.String("currency", currency.String()),
+				zap.Int("bricks_needing_prices", len(bricksNeedingPrices)),
+			)
+
+			// Check if there's already a runtime for this set
+			if rs, ok := h.srh.FindRuntimeSetBySetId(setId); ok {
+				// Return existing websocket
+				render.Accepted(w, r, set.DetailsResponse{
+					Completed:   false,
+					WebsocketID: rs.ID.String(),
+				})
+				return
+			}
+
+			// Create websocket runtime for price fetching
+			rs := h.srh.RunSet(cachedSet)
+
+			// TODO : combine fullbatch and bricksNeedingPrices
+			// We only want to cache minimal bricks in the set, but full bricks are already available without prices
+			h.srh.PushBatchProgress(rs.ID, setruntime.DataTypePickabrickBricks, fullbatch)
+
+			// Start goroutine to fetch missing prices
+			go func(ctx context.Context, rsID uuid.UUID, bricks []set.Brick, cachedSet set.Set) {
+				defer h.srh.StopRuntimeSet(rsID)
+
+				zap.L().Info("Starting price fetch goroutine",
+					zap.String("runtime_id", rsID.String()),
+					zap.Int("bricks_count", len(bricks)),
+				)
+
+				// Initialize progress tracker
+				bprogress := setruntime.NewProgress(len(bricks))
+
+				// Fetch prices for each brick needing updates
+				for _, brick := range bricks {
+					brickID, err := brick.GetBrickIDForRedis()
+					if err != nil {
+						zap.L().Warn("Failed to get brick ID for redis",
+							zap.Error(err),
+						)
+						continue
+					}
+
+					// Fetch brick with price for the requested currency
+					matchingBricks, err := pickabrick.C().FetchBricksByBrickID(string(brickID), locale, currency)
+					if err != nil {
+						// Failed to fetch price - log and continue
+						zap.L().Warn("Failed to fetch brick price for currency",
+							zap.Error(err),
+							zap.String("brick_id", string(brickID)),
+							zap.String("design_id", string(brick.DesignID)),
+							zap.String("currency", currency.String()),
+						)
+						// Add brick without new price to progress
+						bprogress.AddItem(brick)
+						// Check batch progress
+						if bprogress.HasReachedBatchLimit() {
+							if !bprogress.EmptyItems() {
+								h.srh.PushBatchProgress(rsID, setruntime.DataTypePickabrickBricks, *bprogress)
+								bprogress.CompleteBatch()
+							}
+						}
+						continue
+					}
+
+					// Find matching brick and update price
+					priceUpdated := false
+					for _, mb := range matchingBricks {
+						if set.BrickID(mb.ID) == brickID {
+							// Update brick with fetched price
+							pbp := set.MapPriceFromPickabrick(mb.Price)
+							pbp.ItemID = string(brickID)
+							if brick.Prices == nil {
+								brick.Prices = make(map[language.Tag]*set.Price)
+							}
+							brick.Prices[currency] = &pbp
+
+							// Cache the updated brick
+							if err = set.SetRedisBrick(ctx, brick, 0); err != nil {
+								zap.L().Warn("Failed to cache updated brick price",
+									zap.Error(err),
+									zap.String("brick_id", string(brickID)),
+								)
+							}
+
+							// Apply currency
+							brick.ApplyCurrency(currency)
+							priceUpdated = true
+							break
+						}
+					}
+
+					if !priceUpdated {
+						// Brick not found in API response - might be discontinued
+						brick.ApplyCurrency(currency)
+					}
+
+					// Update progress
+					bprogress.AddItem(brick)
+
+					// Check batch progress
+					if bprogress.HasReachedBatchLimit() {
+						if !bprogress.EmptyItems() {
+							h.srh.PushBatchProgress(rsID, setruntime.DataTypePickabrickBricks, *bprogress)
+							bprogress.CompleteBatch()
+						}
+					}
+				}
+
+				// Send final batch if there are remaining items
+				if !bprogress.EmptyItems() {
+					h.srh.PushBatchProgress(rsID, setruntime.DataTypePickabrickBricks, *bprogress)
+					bprogress.CompleteBatch()
+				}
+
+				// Mark as completed
+				h.srh.PushChange(rsID, setId, setruntime.DataTypeSet, setruntime.DataTypeCompleted)
+
+				zap.L().Info("Price fetch completed",
+					zap.String("runtime_id", rsID.String()),
+				)
+			}(r.Context(), rs.ID, bricksNeedingPrices, cachedSet)
+
+			// Return websocket ID for client to connect
 			render.Accepted(w, r, set.DetailsResponse{
-				Completed: true,
-				Set:       cachedSet,
+				Completed:   false,
+				WebsocketID: rs.ID.String(),
 			})
 			return
 		default:
@@ -385,6 +547,8 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 
 		// todo : v3 - optimize
 		for designID := range bmap.BricksByDesign {
+
+			// TODO : v2 - fetching this feels pretty slow and inefficient
 
 			// Not using cache here because prices need to be fresh. However, we could put a short TTL cache?
 

@@ -3,6 +3,7 @@ package set
 import (
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
 	"golang.org/x/text/language"
@@ -24,9 +25,16 @@ func (bm *BrickMinimal) GetBrickIDForRedis() (BrickID, error) {
 	if bm.MainID != nil {
 		keyID = *bm.MainID
 	} else if len(bm.IDs) > 0 {
-		// No main ID, use the first available ID
-		keyID = bm.IDs[0]
-	} else {
+		// No main ID: return the first non-empty (after trimming) ID in the list
+		for _, id := range bm.IDs {
+			if strings.TrimSpace(string(id)) != "" {
+				keyID = id
+				break
+			}
+		}
+		// If no valid ID found in the slice, fall through to the error
+	}
+	if keyID == "" {
 		// No IDs at all - this shouldn't happen, but handle gracefully
 		return "", errors.New("brick has no valid ID")
 	}
