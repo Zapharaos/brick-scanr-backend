@@ -115,6 +115,8 @@ func (rs *RuntimeSet) stop() {
 func (rs *RuntimeSet) run() {
 	rs.wg.Add(1)
 
+	rs.set = set.Set{}
+
 	setActivityTimer := time.NewTimer(rs.opt.Timeout)
 	clientExpire := time.NewTicker(rs.opt.ClientTimeoutCheckFreq)
 	setChangesListenerTimer := time.NewTicker(rs.opt.setChangeCheckFreq)
@@ -180,7 +182,6 @@ func (rs *RuntimeSet) handle(msg clientMessage) {
 	err := json.Unmarshal(msg.data, &p)
 	if err != nil {
 		zap.L().Error("Failed to unmarshal packet", zap.Error(err))
-		// todo: v2 - do we close cli connection here ?
 		return
 	}
 
@@ -189,19 +190,18 @@ func (rs *RuntimeSet) handle(msg clientMessage) {
 		return
 	}
 
+	// For now, clients can only receive updates
+
 	// then we need to check the type of packet
 	switch p.Type {
 
-	// TODO : Client - case client update ?
-
-	case PacketTypeClientDisconnect:
-		// TODO : Client - clear set ?
 	}
 }
 
 // checkForChanges checks for changes in the runtime set, like images, inventory, prices etc.
 func (rs *RuntimeSet) checkForChanges() {
-	// TODO : Client - implement
+	// TODO : implement
+	// For client that joined while the process was already running, allow global refresh of data?
 }
 
 // handleDataChange handles a data change
@@ -215,6 +215,8 @@ func (rs *RuntimeSet) handleDataChange(change dataChange) {
 		rs.handleDataChangeCompleted(change)
 	case DataTypeFailed:
 		rs.handleDataChangeFailed(change)
+	case DataTypeProgress:
+		rs.handleDataChangeProgress(change)
 	}
 }
 

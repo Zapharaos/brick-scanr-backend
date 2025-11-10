@@ -66,7 +66,7 @@ func New(setHandler *setruntime.Handler) *Router {
 
 			// Details
 			r.Post("/details/{id}", router.handler.FetchSetDetails)
-			r.Get("/details/ws/{id}", router.handler.SetDetailsJobWebSocket)
+			r.Get("/details/ws/{id}", router.handler.SetDetailsWebSocket)
 		})
 	})
 

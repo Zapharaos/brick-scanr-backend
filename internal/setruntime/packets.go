@@ -9,11 +9,13 @@ import (
 type PacketType string
 
 const (
-	PacketTypeInit             PacketType = "init"
-	PacketTypeLog              PacketType = "log"
-	PacketTypeError            PacketType = "error"
-	PacketTypeSuccess          PacketType = "success"
-	PacketTypeClientDisconnect PacketType = "clientDisconnect"
+	PacketTypeInit           PacketType = "init"
+	PacketTypeLog            PacketType = "log"
+	PacketTypeError          PacketType = "error"
+	PacketTypeFatal          PacketType = "fatal"
+	PacketTypeSuccess        PacketType = "success"
+	PacketTypeSet            PacketType = "set"
+	PacketTypeInventoryBatch PacketType = "inventoryBatch"
 )
 
 type PacketErrorCode int
@@ -23,12 +25,22 @@ const (
 	ErrorClientNotFound
 )
 
+type BatchStatus string
+
+const (
+	BatchStatusBricklinkInventory BatchStatus = "bricklinkInventory"
+	BatchStatusPickabrickPrices   BatchStatus = "pickabrickPrices"
+)
+
 // packetSpec is a struct that contains all the possible packets, used for swagger doc and generation
 type packetSpec struct {
-	Packet      packet      `json:"packet"`
-	PacketLog   PacketLog   `json:"packetLog"`
-	PacketInit  PacketInit  `json:"packetInit"`
-	PacketError PacketError `json:"packetError"`
+	Packet               packet               `json:"packet"`
+	PacketLog            PacketLog            `json:"packetLog"`
+	PacketInit           PacketInit           `json:"packetInit"`
+	PacketError          PacketError          `json:"packetError"`
+	PacketFatal          PacketFatal          `json:"packetFatal"`
+	PacketSet            PacketSet            `json:"packetSet"`
+	PacketInventoryBatch PacketInventoryBatch `json:"packetInventoryBatch"`
 }
 
 // Packet interface
@@ -133,9 +145,77 @@ func (p *PacketError) ToJSON() ([]byte, error) {
 	return json.Marshal(p)
 }
 
-// NewPacketClientDisconnect creates a new PacketClientDisconnect
-func NewPacketClientDisconnect() *packet {
-	return &packet{
-		Type: PacketTypeClientDisconnect,
+// PacketFatal is a packet to send a fatal internal error
+type PacketFatal struct {
+	packet
+	Step    set.FetchErrorStep `json:"step"`
+	Message string             `json:"message"`
+}
+
+// NewPacketFatal creates a new PacketFatal
+func NewPacketFatal(step set.FetchErrorStep, message string) *PacketFatal {
+	return &PacketFatal{
+		packet: packet{
+			Type: PacketTypeFatal,
+		},
+		Step:    step,
+		Message: message,
 	}
+}
+
+// ToJSON returns the JSON representation of the packet
+func (p *PacketFatal) ToJSON() ([]byte, error) {
+	return json.Marshal(p)
+}
+
+// --------------------------------------------
+// --------------------------------------------
+// --------------------------------------------
+
+type PacketSet struct {
+	packet
+	Set set.Set `json:"set"`
+}
+
+// NewPacketSet creates a new PacketSet
+func NewPacketSet(s set.Set, bricks bool) *PacketSet {
+	if !bricks {
+		s.Bricks = []set.Brick{}
+	}
+	return &PacketSet{
+		packet: packet{
+			Type: PacketTypeSet,
+		},
+		Set: s,
+	}
+}
+
+// ToJSON returns the JSON representation of the packet
+func (p *PacketSet) ToJSON() ([]byte, error) {
+	return json.Marshal(p)
+}
+
+// PacketInventoryBatch is a packet to send a batch of bricks
+type PacketInventoryBatch struct {
+	packet
+	Bricks         []set.Brick `json:"bricks"`
+	BricksProgress *Progress   `json:"bricksProgress"`
+	Status         BatchStatus `json:"status"`
+}
+
+// NewPacketInventoryBatch creates a new PacketInventoryBatch
+func NewPacketInventoryBatch(bricks []set.Brick, progress *Progress, status BatchStatus) *PacketInventoryBatch {
+	return &PacketInventoryBatch{
+		packet: packet{
+			Type: PacketTypeInventoryBatch,
+		},
+		Bricks:         bricks,
+		BricksProgress: progress,
+		Status:         status,
+	}
+}
+
+// ToJSON returns the JSON representation of the packet
+func (p *PacketInventoryBatch) ToJSON() ([]byte, error) {
+	return json.Marshal(p)
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
 	"github.com/Zapharaos/brick-scanr-backend/internal/handlers/render"
@@ -14,9 +15,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+	"golang.org/x/text/language"
 )
 
-// TODO : v2 - rate limiting
+// todo : v3 - rate limiting
+// todo : v3 - determine TTLs? in config file?
+// todo : v3 - implement retry mechanism for setRedis?
 
 // SearchSets godoc
 //
@@ -72,8 +76,7 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Try to find the set in Redis cache by BrickLink ID
-		// todo : concurrent write/get ? if the same search happens at the same time
-		// todo : v3 - skip cache if not same locale?
+		// todo : v3 - concurrent write/get ? if the same search happens at the same time
 		bricklinkSet, err := set.GetRedisBricklinkSet(r.Context(), fmt.Sprintf("%d", item.BricklinkID))
 		if errors.Is(err, set.ErrKeyNotFound) {
 			// Not found in cache, store it
@@ -127,51 +130,120 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Extract locale + currency from context
+	locale := GetLocaleFromContext(r)
+	currency := GetCurrencyFromContext(r)
+
 	zap.L().Info("StartSetDetailsJob endpoint called",
 		zap.String("id", setId.String()),
+		zap.String("locale", locale.String()),
+		zap.String("currency", currency.String()),
 		zap.String("remote_addr", r.RemoteAddr),
 	)
 
-	// todo : v3 - skip cache if not same locale? cache brick separately from set?
 	// Search for cached set data
 	cachedSet, err := set.GetRedisSet(r.Context(), setId)
 	if err != nil {
 		// Failed to retrieve cached data, start a new fetch
-	} else if cachedSet.FetchStatus == set.FetchStatusFailed {
-		// Previous fetch failed, log and continue to start a new fetch
-		zap.L().Warn("Previous set details fetch failed, starting a new fetch",
-			zap.String("id", setId.String()),
-		)
-	} else if cachedSet.FetchStatus == set.FetchStatusCompleted {
-		// Data is cached and complete, return it with completed flag
-		zap.L().Info("Set details found in cache, returning cached data",
-			zap.String("id", setId.String()),
-		)
-		render.Accepted(w, r, set.DetailsResponse{
-			Completed: true,
-			Set:       cachedSet,
-		})
-		return
-	} else if cachedSet.FetchStatus == set.FetchStatusFetching {
-		// Data is being fetched
-		zap.L().Info("Set details still being fetched, returning websocket info",
-			zap.String("id", setId.String()),
-		)
-		// Find the existing runtime set
-		if rs, ok := h.srh.FindRuntimeSetBySetId(setId); ok {
+	} else {
+		switch cachedSet.FetchStatus {
+		case set.FetchStatusFailed:
+			// Previous fetch failed, log and continue to start a new fetch
+			zap.L().Warn("Previous set details fetch failed, starting a new fetch",
+				zap.String("id", setId.String()),
+			)
+			break
+		case set.FetchStatusCompleted:
+			// Data is cached and complete, meaning the bricks and prices are available as well
+			// If a brick is missing, it means it was not available at fetch time => check TTL before re-fetching
+
+			zap.L().Info("Set details found in cache, returning cached data",
+				zap.String("id", setId.String()),
+			)
+
+			bfull := make([]set.Brick, 0)
+			bmissing := make([]set.Brick, 0)
+			pmissing := make([]set.Brick, 0)
+
+			// For each brick, retrieve full data from cache and apply currency
+			for _, bmin := range cachedSet.Bricks {
+
+				// Retrieve brickID - needed to get the brick from cache - it should not fail
+				brickID, err := bmin.GetBrickIDForRedis()
+				if err != nil {
+					zap.L().Error("failed to get brick ID for redis",
+						zap.Error(err),
+					)
+					continue
+				}
+
+				// Try to find in cache first
+				brick, err := set.GetRedisBrick(r.Context(), brickID, bmin.DesignID)
+				if err != nil {
+					// TODO : v2 - shouldn't happen unless TTL expired => re-fetch?
+					bmissing = append(bmissing, bmin)
+					continue
+				}
+
+				// Search for the currency price
+				if brick.Prices == nil || len(brick.Prices) == 0 {
+					// No prices at all => the product is probably not available for sale anymore
+				} else if price := brick.GetPriceForLocale(currency); price == nil || price.CentAmount == 0 {
+					// TODO : v2 - price missing for currency => re-fetch?
+					pmissing = append(pmissing, bmin)
+					continue
+				}
+
+				// Apply currency only locally, without caching it
+				brick.ApplyCurrency(currency)
+				bfull = append(bfull, brick)
+			}
+
+			cachedSet.Bricks = bfull
+
+			if len(bmissing) > 0 || len(pmissing) > 0 {
+				zap.L().Warn("Set details incomplete in cache: missing bricks or prices",
+					zap.String("id", setId.String()),
+					zap.Int("bricks_missing_count", len(bmissing)),
+					zap.Int("prices_missing_count", len(pmissing)),
+				)
+			}
+
+			// For now, we return whatever is cached
 			render.Accepted(w, r, set.DetailsResponse{
-				Completed:   false,
-				WebsocketID: rs.ID.String(),
+				Completed: true,
+				Set:       cachedSet,
 			})
 			return
+		default:
+			// Data is being fetched
+			zap.L().Info("Set details still being fetched, returning websocket info",
+				zap.String("id", setId.String()),
+			)
+
+			// todo : v2 - for each bricks, retrieve the cached brick (or API brick) and apply currency
+			// todo : v2 - how to sync? at the time we get here, the goroutine might have reached the next step
+
+			// TODO : handle differently depending on the rs.FetchStatus?
+
+			// Find the existing runtime set
+			if rs, ok := h.srh.FindRuntimeSetBySetId(setId); ok {
+				render.Accepted(w, r, set.DetailsResponse{
+					Completed:   false,
+					Set:         cachedSet,
+					WebsocketID: rs.ID.String(),
+				})
+				return
+			}
+			// If we reach here, something is inconsistent. Log and continue to start a new fetch
+			zap.L().Warn("Inconsistent state: set marked as fetching but no runtime set found",
+				zap.String("id", setId.String()),
+			)
 		}
-		// If we reach here, something is inconsistent. Log and continue to start a new fetch
-		zap.L().Warn("Inconsistent state: set marked as fetching but no runtime set found",
-			zap.String("id", setId.String()),
-		)
 	}
 
 	// Retrieve BrickLink set info from cache
+	// This assumes the set was cached during search - should always be the case
 	bricklinkSet, err := set.GetRedisBricklinkSetFromSetID(r.Context(), setId)
 	if err != nil {
 		render.Error(w, r, err, "Failed to retrieve BrickLink set from cache")
@@ -181,21 +253,39 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 	// Create websocket
 	rs := h.srh.RunSet(bricklinkSet)
 
-	// Extract locale + currency from context
-	locale := GetLocaleFromContext(r)
-	currency := GetCurrencyFromContext(r)
-
-	// Helper to handle fatal errors
-	handleFatalError := func(dataType setruntime.DataType, err error, msg string, fields ...zap.Field) {
+	// Helper for fatal errors
+	handleFatalError := func(step set.FetchErrorStep, data set.Set, dataType setruntime.DataType, err error, msg string, fields ...zap.Field) {
+		// Log the error
 		zap.L().Error(msg, append(fields, zap.Error(err))...)
+
+		// Mark set as failed in cache with error details
+		data.FetchStatus = set.FetchStatusFailed
+		data.FetchError = &set.FetchError{
+			Message: msg,
+			Step:    step,
+		}
+
+		// Try to update cache - best effort, don't fail if this fails
+		_ = set.SetRedisSet(context.Background(), data, time.Hour) // Short TTL for failed states
+
+		// Notify all connected clients
 		h.srh.PushChange(rs.ID, setId, dataType, setruntime.DataTypeFailed)
+	}
+
+	// Helper for non-critical errors
+	handleNonFatalError := func(err error, msg string, fields ...zap.Field) {
+		zap.L().Warn(msg, append(fields, zap.Error(err))...)
 	}
 
 	// Start processing in background
 	go func() {
+
 		// Ensure runtime set is stopped at the end
-		// TODO : keep? users still need the final result
-		// defer h.srh.StopRuntimeSet(rs.ID)
+		defer func() {
+			// Give clients time to receive the message before cleanup
+			time.Sleep(3 * time.Second)
+			h.srh.StopRuntimeSet(rs.ID)
+		}()
 
 		// Use background context since request context will be canceled after response is sent
 		ctx := context.Background()
@@ -203,114 +293,185 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		// Initialize copy of set inside redis
 		cpRedisSet := bricklinkSet
 
-		// Update in cache
-		cpRedisSet.FetchStatus = set.FetchStatusStarting
+		// Cache the status => for concurrent access to the websocket
+		cpRedisSet.FetchStatus = set.FetchStatusFetching
 		err = set.SetRedisSet(ctx, cpRedisSet, 0)
 		if err != nil {
-			handleFatalError(setruntime.DataTypeSet, err, "Failed to init Redis set",
+			// Failed to update the set in cache => FATAL, concurrent requests won't see it's being processed
+			handleFatalError(set.FetchErrorInitCache, cpRedisSet, setruntime.DataTypeSet, err, "Failed to update Redis set inventory",
 				zap.String("set_id", setId.String()))
 			return
 		}
-
-		// Push to websocket
 		h.srh.PushChange(rs.ID, setId, setruntime.DataTypeSet, setruntime.DataTypeCreated)
 
 		// TODO : v2 - fetch set
+		/* err = set.SetRedisSet(ctx, cpRedisSet, 0)
+		if err != nil {
+			handleFatalError(setruntime.DataTypeSet, err, "Failed to update Redis set inventory",
+				zap.String("set_id", setId.String()))
+			return
+		}
+		h.srh.PushChange(rs.ID, setId, setruntime.DataTypeSet, setruntime.DataTypeUpdated)*/
 
 		// Fetch inventory
-		h.srh.PushChange(rs.ID, setId, setruntime.DataTypeSetInventory, setruntime.DataTypeCreated)
 		inventory, err := bricklink.C().FetchInventory(bricklinkSet.BricklinkID, bricklinkSet.BricklinkNumber)
 		if err != nil {
-			handleFatalError(setruntime.DataTypeSetInventory, err, "Failed to fetch inventory",
+			// Failed to fetch inventory => FATAL, the set is useless without it
+			handleFatalError(set.FetchErrorFetchInventory, cpRedisSet, setruntime.DataTypeBricklinkBricks, err, "Failed to fetch inventory",
 				zap.Int("id", bricklinkSet.BricklinkID),
 				zap.String("set_number", bricklinkSet.BricklinkNumber))
 			return
 		}
 
 		// Map Bricklink inventory to internal set bricks
-		cpRedisSet.Bricks = set.MapBricksFromBricklinkInventory(inventory)
+		bprogress := setruntime.NewProgress(len(inventory.Items))
+		for _, item := range inventory.Items {
 
-		// Update in cache
-		cpRedisSet.FetchStatus = set.FetchStatusFetchingInventoryPrices
-		err = set.SetRedisSet(ctx, cpRedisSet, 0)
-		if err != nil {
-			handleFatalError(setruntime.DataTypeSet, err, "Failed to update Redis set inventory",
-				zap.String("set_id", setId.String()))
-			return
+			// Try to find in cache first
+			brick, err := set.GetRedisBrick(ctx, set.BrickID(item.ItemIDs[0]), set.DesignID(item.ItemNo))
+			if err != nil {
+				// Not found in cache, map from Bricklink item
+				brick = set.MapBrickFromBricklinkInventoryItem(item)
+
+				// Cache the brick
+				if err = set.SetRedisBrick(ctx, brick, 0); err != nil {
+					// Failed to cache brick, log and pursue processing
+					zap.L().Warn("Failed to cache brick", zap.Error(err),
+						zap.String("brick_design_id", item.ItemNo),
+					)
+				}
+			}
+
+			// TODO : v2 - brick already cached? update it's TTL to match set's TTL
+			// But then there is a risk that the price might become outdated at some point
+			// Use price TTL ? Limit the amount of TTL postponements? Limit TTL regarding a brick.created_at field?
+
+			// Append new brickIDs to cached bricksIDs ?
+
+			// Update set copy with minimal brick info - just enough to identify the brick
+			// Note: this helps linking a set brick to brick instance; full brick data can be gotten from cache or API
+			cpRedisSet.Bricks = append(cpRedisSet.Bricks, brick)
+
+			// Update progress
+			bprogress.AddItem(brick)
+
+			// Check batch progress
+			if bprogress.HasReachedBatchLimit() {
+
+				// No items in batch, continue
+				if bprogress.EmptyItems() {
+					bprogress.CompleteBatch()
+					continue
+				}
+
+				// Send batch update via websocket with current batch data
+				h.srh.PushBatchProgress(rs.ID, setruntime.DataTypeBricklinkBricks, *bprogress)
+				bprogress.CompleteBatch()
+
+				// Update set in cache
+				err = set.SetRedisSet(ctx, cpRedisSet, 0)
+				if err != nil {
+					// Fatal error - inventory is essential
+					handleFatalError(set.FetchErrorBatchCache, cpRedisSet, setruntime.DataTypeSet, err, "Failed to update Redis set inventory",
+						zap.String("set_id", setId.String()))
+					return
+				}
+			}
 		}
 
-		// Push to websocket
-		h.srh.PushChange(rs.ID, setId, setruntime.DataTypeSetInventory, setruntime.DataTypeCompleted)
-		h.srh.PushChange(rs.ID, setId, setruntime.DataTypeSetInventoryPrices, setruntime.DataTypeCreated)
-
 		// Fetch prices
-		bmap := cpRedisSet.NewBrickMap()
-		currentProgress := 0
-		total := len(bmap.BricksByDesign)
+		bmap := set.NewBrickMap(cpRedisSet.Bricks)
+		bprogress = setruntime.NewProgress(len(bmap.BricksByDesign))
+
 		// todo : v3 - optimize
 		for designID := range bmap.BricksByDesign {
+
+			// Not using cache here because prices need to be fresh. However, we could put a short TTL cache?
+
+			// Note : the API allows fetching all brickID's linked to a designID, but also allows fetching single brickID
+			// DesignID : fewer API calls, less rate limiting risk, less network latency. More processing complexity.
+			// DesignID should be more performant as the set inventory unique brick count grows.
+
 			// Fetch bricks by designID
-			results, err := pickabrick.C().FetchBricksByDesignID(string(designID), locale, currency)
+			matchingBricks, err := pickabrick.C().FetchBricksByDesignID(string(designID), locale, currency)
 			if err != nil {
-				handleFatalError(setruntime.DataTypeSetInventory, err, "Failed to fetch bricks by designID",
+				handleNonFatalError(err, "Failed to fetch bricks by designID",
 					zap.String("designID", string(designID)),
 					zap.String("set_id", setId.String()))
 				return
 			}
 
-			// Process results
-			for _, res := range results {
-				brickID := set.BrickID(res.ID)
+			// Process matching bricks
+			for _, mb := range matchingBricks {
 				// Try to match the result ID's with the set bricks ID's
+				brickID := set.BrickID(mb.ID)
 				brick, ok := bmap.GetBrickByID(brickID)
-				if !ok || brick == nil {
+				if !ok {
+					// No matching brick ID, skip
 					continue
 				}
-				if brick.Price.CentAmount == 0 || res.Price.CentAmount < brick.Price.CentAmount {
-					brick.MainID = &brickID
-					brick.Price = set.MapPriceFromPickabrick(res.Price)
+
+				// Check if currency price is already set => skip if price better than fetched price
+				price := brick.GetPriceForLocale(currency)
+				if price != nil && brick.Price.CentAmount != 0 && price.CentAmount < mb.Price.CentAmount {
+					continue
 				}
+
+				// Update brick with fetched price
+				pbp := set.MapPriceFromPickabrick(mb.Price)
+				pbp.ItemID = string(brickID)
+				if brick.Prices == nil {
+					brick.Prices = make(map[language.Tag]*set.Price)
+				}
+				brick.Prices[currency] = &pbp
+
+				// Update brick in cache
+				if err = set.SetRedisBrick(ctx, brick, 0); err != nil {
+					// Failed to update brick in cache, log and continue
+					zap.L().Warn("Failed to update brick price in cache", zap.Error(err),
+						zap.String("brick_design_id", string(designID)),
+						zap.String("brick_id", string(brickID)),
+					)
+				}
+
+				// Apply currency only locally, without caching it
+				brick.ApplyCurrency(currency)
+
+				// Update progress - add brick to batch
+				bprogress.AddItem(brick)
 			}
 
-			currentProgress++
+			// Update progress counter (even if no matching bricks found)
+			bprogress.Increment()
 
-			// Update progress every 10 items or on last item
-			if currentProgress%10 == 0 || currentProgress == total {
-				// TODO : v2 - use percentages? keep?
-				_ = 25 + ((currentProgress * 75) / total) // 25-100%
-
-				// Determine current fetch status
-				var fetchStatus set.FetchStatus
-				var changeReason setruntime.DataChangeReason
-				if currentProgress == total {
-					fetchStatus = set.FetchStatusCompleted
-					changeReason = setruntime.DataTypeCompleted
-				} else {
-					fetchStatus = set.FetchStatusFetchingInventoryPrices
-					changeReason = setruntime.DataTypeUpdated
+			// Check batch progress
+			if bprogress.HasReachedBatchLimit() {
+				// Items in batch, update via websocket with current batch data
+				if !bprogress.EmptyItems() {
+					h.srh.PushBatchProgress(rs.ID, setruntime.DataTypePickabrickBricks, *bprogress)
 				}
-
-				// Update in cache
-				cpRedisSet.FetchStatus = fetchStatus
-				err = set.SetRedisSet(ctx, cpRedisSet, 0)
-				if err != nil {
-					handleFatalError(setruntime.DataTypeSet, err, "Failed to update Redis set inventory prices",
-						zap.String("set_id", setId.String()))
-					return
-				}
-
-				// Push to websocket
-				h.srh.PushChange(rs.ID, setId, setruntime.DataTypeSetInventoryPrices, changeReason)
+				bprogress.CompleteBatch()
 			}
 		}
 
-		// Push to websocket
+		// Send final batch if there are remaining items
+		if bprogress.BatchCurr > 0 {
+			h.srh.PushBatchProgress(rs.ID, setruntime.DataTypePickabrickBricks, *bprogress)
+			bprogress.CompleteBatch()
+		}
+
+		// Mark set fetch completed => send final update
+		cpRedisSet.FetchStatus = set.FetchStatusCompleted
+		err = set.SetRedisSet(ctx, cpRedisSet, 0)
+		if err != nil {
+			// Failed to cache the final version => FATAL, the set is useless without it
+			handleFatalError(set.FetchErrorFinalCache, cpRedisSet, setruntime.DataTypeSet, err, "Failed to update Redis set inventory",
+				zap.String("set_id", setId.String()))
+			return
+		}
 		h.srh.PushChange(rs.ID, setId, setruntime.DataTypeSet, setruntime.DataTypeCompleted)
 
-		zap.L().Info("Successfully completed set details job",
-			zap.String("id", setId.String()),
-			zap.Int("unique_items", total),
-		)
+		zap.L().Info("Successfully completed set details job", zap.String("id", setId.String()))
 	}()
 
 	render.Accepted(w, r, set.DetailsResponse{
@@ -319,23 +480,21 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// SetDetailsJobWebSocket godoc
+// SetDetailsWebSocket godoc
 //
-//	@Id				SetDetailsJobWebSocket
+//	@Id				SetDetailsWebSocket
 //
-//	@Summary		Websocket for a set details job
-//	@Description    Websocket for updates on a set details job.
+//	@Summary		Websocket for a set details
+//	@Description    Websocket for real-time updates on set details fetching progress.
 //	@Tags			Set
 //	@Security		Bearer
-//	@Param			id		path		string			true			"Job ID"
-//	@Success		200		{string}	string							"ok"
+//	@Param			id		path		string			true			"Runtime Set ID (WebSocket ID from FetchSetDetails response)"
+//	@Success		101		{string}	string							"Switching Protocols"
 //	@Failure		401		{object}	setruntime.packetSpec			"Packet Specification"
-//
-// TODO:	Client //  @Failure		409		{object}	setruntime.checkoutTypeItem	 	"checkoutTypeItem"
-//
+//	@Failure		404		{string}	string							"Runtime Set Not Found"
 //	@Failure		500		{string}	string							"Internal Server Error"
-//	@Router			/api/v1/details/ws/{id} [get]
-func (h Handler) SetDetailsJobWebSocket(w http.ResponseWriter, r *http.Request) {
+//	@Router			/api/v1/set/details/ws/{id} [get]
+func (h Handler) SetDetailsWebSocket(w http.ResponseWriter, r *http.Request) {
 	rsId, ok := ParseParamUUID(w, r, "id")
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
@@ -345,20 +504,14 @@ func (h Handler) SetDetailsJobWebSocket(w http.ResponseWriter, r *http.Request) 
 	// Verify job exists
 	rs := h.srh.GetRuntimeSet(rsId)
 	if rs == nil {
+		// Check if set failed in cache
+		cachedSet, err := set.GetRedisSet(r.Context(), rsId)
+		if err == nil && cachedSet.FetchStatus == set.FetchStatusFailed {
+			render.Error(w, r, fmt.Errorf("FetchStatusFailed"), fmt.Sprintf("Set %s FetchStatusFailed", rsId.String()))
+			return
+		}
+
 		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-
-	// TODO : Client - handle user ID?
-	userId, err := uuid.NewUUID()
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	// Check if client already connected
-	if rs.HasClient(userId) {
-		w.WriteHeader(http.StatusConflict)
 		return
 	}
 
@@ -370,6 +523,15 @@ func (h Handler) SetDetailsJobWebSocket(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Generate a unique client ID for this connection
+	// Multiple clients can watch the same job progress simultaneously
+	clientId := uuid.New()
+
+	zap.L().Info("WebSocket client connected",
+		zap.String("runtime_set_id", rsId.String()),
+		zap.String("client_id", clientId.String()),
+	)
+
 	// Create and register client
-	setruntime.NewClient(rs, conn, userId)
+	setruntime.NewClient(rs, conn, clientId)
 }
