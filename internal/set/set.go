@@ -8,17 +8,31 @@ import (
 type FetchStatus int
 
 const (
-	FetchStatusUnknown FetchStatus = iota
-	FetchStatusStarting
+	FetchStatusPending FetchStatus = iota
 	FetchStatusFetching
-	FetchStatusFetchingInventory
-	FetchStatusFetchingInventoryPrices
 	FetchStatusCompleted
 	FetchStatusFailed
 )
 
+type FetchErrorStep int
+
+const (
+	FetchErrorUnknown FetchErrorStep = iota + 1
+	FetchErrorInitCache
+	FetchErrorBatchCache
+	FetchErrorFinalCache
+	FetchErrorFetchInventory
+	FetchErrorFetchPrices
+)
+
+type FetchError struct {
+	Message string         `json:"message"`
+	Step    FetchErrorStep `json:"step"`
+}
+
 type Set struct {
 	FetchStatus     FetchStatus `json:"fetch_status"`
+	FetchError      *FetchError `json:"fetch_error,omitempty"`
 	Id              uuid.UUID   `json:"id"`
 	Name            string      `json:"name"`
 	Number          string      `json:"number"`
@@ -29,6 +43,7 @@ type Set struct {
 	BricklinkNumber string      `json:"bricklink_number"`
 }
 
+// MapSetFromBricklinkSearch maps a Bricklink search item to an internal Set representation
 func MapSetFromBricklinkSearch(bs bricklink.SearchItem) (Set, error) {
 	// Assign a local UUID to each set
 	setId, err := uuid.NewUUID()
@@ -43,16 +58,6 @@ func MapSetFromBricklinkSearch(bs bricklink.SearchItem) (Set, error) {
 		BricklinkID:     bs.IDItem,
 		BricklinkNumber: bs.StrItemNo,
 	}, nil
-}
-
-func MapBricksFromBricklinkInventory(bi *bricklink.Inventory) []Brick {
-	bricks := make([]Brick, 0, len(bi.Items))
-	for _, item := range bi.Items {
-		brick := MapBrickFromBricklinkInventoryItem(item)
-		bricks = append(bricks, brick)
-	}
-
-	return bricks
 }
 
 // DetailsResponse represents the response for a set details request

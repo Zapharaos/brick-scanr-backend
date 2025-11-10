@@ -78,6 +78,10 @@ func BuildKeySetIDToBricklinkID(setID uuid.UUID) string {
 	return fmt.Sprintf("set:%s:bricklink", setID)
 }
 
+func BuildKeyBrick(brickID BrickID, designID DesignID) string {
+	return fmt.Sprintf("brick:%s:%s", brickID, designID)
+}
+
 // GetRedisSet retrieves a Set from Redis by its UUID
 func GetRedisSet(ctx context.Context, setID uuid.UUID) (Set, error) {
 	key := BuildKeySet(setID)
@@ -163,6 +167,37 @@ func GetRedisBricklinkSetFromSetID(ctx context.Context, setID uuid.UUID) (Set, e
 	return cachedSet, nil
 }
 
+// GetRedisBrick retrieves a Brick from Redis by its BrickID and currency
+func GetRedisBrick(ctx context.Context, brickID BrickID, designID DesignID) (Brick, error) {
+	key := BuildKeyBrick(brickID, designID)
+	data, err := GetRedisByKey(ctx, key)
+	if err != nil && !errors.Is(err, ErrKeyNotFound) {
+		zap.L().Error(
+			"failed to fetch brick data from redis",
+			zap.String("brickID", string(brickID)),
+			zap.String("designID", string(designID)),
+			zap.Error(err),
+		)
+		return Brick{}, err
+	} else if data == "" || errors.Is(err, ErrKeyNotFound) {
+		return Brick{}, ErrKeyNotFound
+	}
+
+	// Found cached data, unmarshal it
+	var cachedBrick Brick
+	if err = json.Unmarshal([]byte(data), &cachedBrick); err != nil {
+		zap.L().Error(
+			"failed to unmarshal cached brick data",
+			zap.String("brickID", string(brickID)),
+			zap.String("designID", string(designID)),
+			zap.Error(err),
+		)
+		return Brick{}, err
+	}
+
+	return cachedBrick, nil
+}
+
 // SetRedisBricklinkSet stores a Set in Redis by its Bricklink ID and also maps the Set ID to the Bricklink ID
 func SetRedisBricklinkSet(ctx context.Context, set Set, ttl time.Duration) error {
 	// Marshal set to JSON
@@ -214,6 +249,35 @@ func SetRedisSet(ctx context.Context, set Set, ttl time.Duration) error {
 
 	key := BuildKeySet(set.Id)
 	err = database.DB().Redis().Client.Set(ctx, key, setJSON, ttl).Err()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// SetRedisBrick stores a Brick in Redis by its BrickID and currency
+func SetRedisBrick(ctx context.Context, brick Brick, ttl time.Duration) error {
+	id, err := brick.GetBrickIDForRedis()
+	if err != nil {
+		zap.L().Error("failed to get brick ID for redis",
+			zap.Error(err),
+		)
+		return err
+	}
+
+	// Marshal brick to JSON
+	brickJSON, err := json.Marshal(brick)
+	if err != nil {
+		zap.L().Error("failed to marshal brick to JSON",
+			zap.Error(err),
+			zap.String("brickID", string(id)),
+			zap.String("designID", string(brick.DesignID)),
+		)
+		return err
+	}
+
+	key := BuildKeyBrick(id, brick.DesignID)
+	err = database.DB().Redis().Client.Set(ctx, key, brickJSON, ttl).Err()
 	if err != nil {
 		return err
 	}

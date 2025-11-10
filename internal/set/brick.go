@@ -1,27 +1,72 @@
 package set
 
 import (
+	"errors"
 	"strconv"
-	"sync"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
+	"golang.org/x/text/language"
 )
 
 type BrickID string
 type DesignID string
 
-type Brick struct {
+type BrickMinimal struct {
 	MainID   *BrickID  `json:"main_id"`
 	IDs      []BrickID `json:"ids"`
 	DesignID DesignID  `json:"design_id"`
-	Name     string    `json:"name"`
-	ImageURL string    `json:"image_url"`
-	Color    string    `json:"color"`
-	ColorHex string    `json:"color_hex"`
-	Quantity int       `json:"quantity"`
-	Price    Price     `json:"price"`
 }
 
+// GetBrickIDForRedis returns the appropriate BrickID to use as a Redis key
+func (bm *BrickMinimal) GetBrickIDForRedis() (BrickID, error) {
+	// Determine the ID to use for Redis key
+	var keyID BrickID
+	if bm.MainID != nil {
+		keyID = *bm.MainID
+	} else if len(bm.IDs) > 0 {
+		// No main ID, use the first available ID
+		keyID = bm.IDs[0]
+	} else {
+		// No IDs at all - this shouldn't happen, but handle gracefully
+		return "", errors.New("brick has no valid ID")
+	}
+	return keyID, nil
+}
+
+type Brick struct {
+	BrickMinimal
+	Name     string `json:"name"`
+	ImageURL string `json:"image_url"`
+	Color    string `json:"color"`
+	ColorHex string `json:"color_hex"`
+	Quantity int    `json:"quantity"`
+	Price    Price  `json:"price"`
+	Prices   map[language.Tag]*Price
+}
+
+// GetPriceForLocale returns the price for the given locale tag, or nil if not found
+func (b *Brick) GetPriceForLocale(tag language.Tag) *Price {
+	if b.Prices != nil {
+		if price, exists := b.Prices[tag]; exists {
+			return price
+		}
+	}
+	return nil
+}
+
+// ApplyCurrency sets the Brick's Price and MainID based on the given locale tag
+func (b *Brick) ApplyCurrency(tag language.Tag) bool {
+	price := b.GetPriceForLocale(tag)
+	if price == nil {
+		return false
+	}
+	b.Price = *price
+	brickID := BrickID(price.ItemID)
+	b.MainID = &brickID
+	return true
+}
+
+// MapBrickFromBricklinkInventoryItem maps a Bricklink InventoryItem to an internal Brick representation
 func MapBrickFromBricklinkInventoryItem(bi bricklink.InventoryItem) Brick {
 	// Map to internal brick representation
 	qty := 0
@@ -45,69 +90,14 @@ func MapBrickFromBricklinkInventoryItem(bi bricklink.InventoryItem) Brick {
 	}
 
 	return Brick{
-		MainID:   mainID,
-		IDs:      ids,
-		DesignID: DesignID(bi.ItemNo),
+		BrickMinimal: BrickMinimal{
+			MainID:   mainID,
+			IDs:      ids,
+			DesignID: DesignID(bi.ItemNo),
+		},
 		Name:     bi.Description,
 		ImageURL: bi.ImageURL,
 		Color:    bi.Color,
 		Quantity: qty,
 	}
-}
-
-type BrickMap struct {
-	BricksByDesign map[DesignID][]*Brick
-	BricksByID     map[BrickID]*Brick
-	mutex          sync.RWMutex
-	_set           *Set
-}
-
-// NewBrickMap creates a new brick map from the set's bricks slice
-func (s *Set) NewBrickMap() BrickMap {
-	bbd := make(map[DesignID][]*Brick)
-	bbi := make(map[BrickID]*Brick)
-
-	// Populate with pointers to bricks in the slice
-	for i := range s.Bricks {
-		brick := &s.Bricks[i] // Get pointer to the actual brick in the slice
-		// Design: create slices if it doesn't exist
-		if _, exists := bbd[brick.DesignID]; !exists {
-			bbd[brick.DesignID] = make([]*Brick, 0)
-		}
-		// Design: append brick to designID slice
-		bbd[brick.DesignID] = append(bbd[brick.DesignID], brick)
-
-		// ID: map brickID to brick
-		for _, brickID := range brick.IDs {
-			if _, exists := bbi[brickID]; !exists {
-				bbi[brickID] = brick
-			}
-		}
-	}
-
-	return BrickMap{
-		BricksByDesign: bbd,
-		BricksByID:     bbi,
-		_set:           s,
-	}
-}
-
-// GetBricksByDesign safely retrieves bricks by designID from the map
-// Returns the brick pointer and a boolean indicating if it was found
-func (bm *BrickMap) GetBricksByDesign(id DesignID) ([]*Brick, bool) {
-	bm.mutex.RLock()
-	defer bm.mutex.RUnlock()
-
-	bricks, ok := bm.BricksByDesign[id]
-	return bricks, ok
-}
-
-// GetBrickByID safely retrieves a brick by ID from the map
-// Returns the brick pointer and a boolean indicating if it was found
-func (bm *BrickMap) GetBrickByID(id BrickID) (*Brick, bool) {
-	bm.mutex.RLock()
-	defer bm.mutex.RUnlock()
-
-	brick, ok := bm.BricksByID[id]
-	return brick, ok
 }

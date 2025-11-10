@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 
-	"go.uber.org/zap"
 	"golang.org/x/text/language"
 )
 
@@ -48,11 +47,11 @@ type graphQLResponse struct {
 
 // FetchBricksByDesignID fetches all bricks matching the designID
 func (c *Client) FetchBricksByDesignID(designID string, locale language.Tag, currency language.Tag) ([]Brick, error) {
-	zap.L().Debug("Fetching Pick-a-Brick elements by design ID",
+	/*zap.L().Debug("Fetching Pick-a-Brick elements by design ID",
 		zap.String("design_id", designID),
 		zap.String("locale", locale.String()),
 		zap.String("currency", currency.String()),
-	)
+	)*/
 
 	// GraphQL query from the LEGO API
 	query := `query ElementByDesignId($collapseDesignId: String!, $filters: ElementFilters, $sku: String) {
@@ -179,10 +178,10 @@ fragment ElementFacetCategory on ElementCategory {
 		return nil, fmt.Errorf("GraphQL error: %s", graphQLResp.Errors[0].Message)
 	}
 
-	zap.L().Debug("Successfully fetched Pick-a-Brick elements",
+	/*zap.L().Debug("Successfully fetched Pick-a-Brick elements",
 		zap.String("design_id", designID),
 		zap.Int("count", len(graphQLResp.Data.Elements)),
-	)
+	)*/
 
 	return graphQLResp.Data.Elements, nil
 }
