@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/database"
+	"github.com/go-redsync/redsync/v4"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -199,8 +200,57 @@ func GetRedisBrick(ctx context.Context, brickID BrickID, designID DesignID) (Bri
 }
 
 // SetRedisBricklinkSet stores a Set in Redis by its Bricklink ID and also maps the Set ID to the Bricklink ID
-func SetRedisBricklinkSet(ctx context.Context, set Set, ttl time.Duration) error {
-	// Marshal set to JSON
+// Uses distributed locking to ensure only one UUID is generated per BrickLink ID across concurrent requests
+// Returns the final Set (with consistent UUID) and a boolean indicating if this call created the entry
+func SetRedisBricklinkSet(ctx context.Context, set Set, ttl time.Duration) (Set, bool, error) {
+	bricklinkID := fmt.Sprintf("%d", set.BricklinkID)
+
+	// Create a distributed lock for this specific BrickLink ID
+	// This ensures only one goroutine can create the set for this BrickLink ID at a time
+	lockKey := fmt.Sprintf("lock:%s", BuildKeyBricklinkIDToSet(bricklinkID))
+	mutex := database.DB().Redis().Redsync.NewMutex(lockKey,
+		// Lock expires after 5 seconds to prevent deadlocks
+		redsync.WithExpiry(5*time.Second),
+		// Retry acquiring the lock every 100ms
+		redsync.WithRetryDelay(100*time.Millisecond),
+		// Try for up to 3 seconds total
+		redsync.WithTries(30),
+	)
+
+	// Acquire the lock
+	if err := mutex.LockContext(ctx); err != nil {
+		zap.L().Error("failed to acquire distributed lock for BrickLink set",
+			zap.Error(err),
+			zap.String("set_id", set.Id.String()),
+			zap.Int("bricklink_id", set.BricklinkID),
+		)
+		return set, false, fmt.Errorf("failed to acquire lock: %w", err)
+	}
+	defer func() {
+		if _, err := mutex.UnlockContext(ctx); err != nil {
+			zap.L().Warn("failed to release distributed lock",
+				zap.Error(err),
+				zap.String("bricklink_id", bricklinkID),
+			)
+		}
+	}()
+
+	// Now that we have the lock, check if the set already exists
+	existingSet, err := GetRedisBricklinkSet(ctx, bricklinkID)
+	if err == nil {
+		// Set already exists (another goroutine created it while we were waiting for the lock)
+		zap.L().Debug("Set already exists in cache, using existing UUID",
+			zap.String("existing_id", existingSet.Id.String()),
+			zap.String("new_id", set.Id.String()),
+			zap.Int("bricklink_id", set.BricklinkID),
+		)
+		return existingSet, false, nil
+	} else if !errors.Is(err, ErrKeyNotFound) {
+		// Unexpected error
+		return set, false, err
+	}
+
+	// Set doesn't exist - create both mappings atomically using a transaction
 	setJSON, err := json.Marshal(set)
 	if err != nil {
 		zap.L().Error("failed to marshal set to JSON",
@@ -208,32 +258,36 @@ func SetRedisBricklinkSet(ctx context.Context, set Set, ttl time.Duration) error
 			zap.String("set_id", set.Id.String()),
 			zap.Int("bricklink_id", set.BricklinkID),
 		)
-		return err
+		return set, false, err
 	}
 
-	// Use a transactional pipeline (MULTI/EXEC)
+	// Use a transactional pipeline (MULTI/EXEC) to ensure both mappings are created atomically
 	tx := database.DB().Redis().Client.TxPipeline()
 
-	// Bind set ID to BrickLink ID
-	// Useful to act as a step while retrieving bricklink set by our internal UUID
+	// Store BrickLink ID -> Set mapping
+	keyBricklinkIDToSet := BuildKeyBricklinkIDToSet(bricklinkID)
+	tx.Set(ctx, keyBricklinkIDToSet, setJSON, ttl)
+
+	// Store Set ID -> BrickLink ID mapping (for reverse lookup)
 	keySetIDToBricklinkID := BuildKeySetIDToBricklinkID(set.Id)
 	tx.Set(ctx, keySetIDToBricklinkID, set.BricklinkID, ttl)
 
-	// Store bricklink set as JSON
-	keyBricklinkIDToSet := BuildKeyBricklinkIDToSet(fmt.Sprintf("%d", set.BricklinkID))
-	tx.Set(ctx, keyBricklinkIDToSet, setJSON, ttl)
-
-	// execute transaction
+	// Execute transaction
 	if _, err := tx.Exec(ctx); err != nil {
 		zap.L().Error("failed to execute redis transaction for storing set",
 			zap.Error(err),
 			zap.String("set_id", set.Id.String()),
 			zap.Int("bricklink_id", set.BricklinkID),
 		)
-		return err
+		return set, false, err
 	}
 
-	return nil
+	zap.L().Debug("Successfully created new set in cache",
+		zap.String("set_id", set.Id.String()),
+		zap.Int("bricklink_id", set.BricklinkID),
+	)
+
+	return set, true, nil
 }
 
 func SetRedisSet(ctx context.Context, set Set, ttl time.Duration) error {

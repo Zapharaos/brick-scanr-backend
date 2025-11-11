@@ -5,13 +5,16 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/go-redsync/redsync/v4"
+	"github.com/go-redsync/redsync/v4/redis/goredis/v9"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
 
 type RedisDB struct {
-	Client *redis.Client
+	Client  *redis.Client
+	Redsync *redsync.Redsync
 }
 
 // NewRedisDB creates a new Redis client.
@@ -36,14 +39,20 @@ func NewRedisDB() RedisDB {
 	if err != nil {
 		zap.L().Error("Failed to connect to Redis", zap.Error(err))
 		return RedisDB{
-			Client: nil,
+			Client:  nil,
+			Redsync: nil,
 		}
 	}
+
+	// Initialize Redsync for distributed locking
+	pool := goredis.NewPool(client)
+	rs := redsync.New(pool)
 
 	zap.L().Info("Connected to Redis")
 
 	return RedisDB{
-		Client: client,
+		Client:  client,
+		Redsync: rs,
 	}
 }
 

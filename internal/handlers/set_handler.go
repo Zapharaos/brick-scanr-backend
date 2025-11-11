@@ -76,14 +76,21 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Try to find the set in Redis cache by BrickLink ID
-		// todo : v3 - concurrent write/get ? if the same search happens at the same time
 		bricklinkSet, err := set.GetRedisBricklinkSet(r.Context(), fmt.Sprintf("%d", item.BricklinkID))
 		if errors.Is(err, set.ErrKeyNotFound) {
-			// Not found in cache, store it
-			err = set.SetRedisBricklinkSet(r.Context(), item, 0)
+			// Not found in cache, store it atomically
+			// This will return the canonical set (with consistent UUID) even if another goroutine wins the race
+			canonicalSet, _, err := set.SetRedisBricklinkSet(r.Context(), item, 0)
 			if err != nil {
-				// Failed to cache set, ignore it
-				continue
+				// Failed to cache set, log but continue with the item we have
+				zap.L().Warn("Failed to cache set in Redis",
+					zap.Error(err),
+					zap.String("set_id", item.Id.String()),
+					zap.Int("bricklink_id", item.BricklinkID),
+				)
+			} else {
+				// Use the canonical set (which has the definitive UUID for this BrickLink ID)
+				item = canonicalSet
 			}
 		} else if err != nil {
 			zap.L().Error("Failed to check set in Redis cache",
@@ -91,12 +98,11 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 				zap.String("set_id", item.Id.String()),
 			)
 			continue
-		}
-
-		// Use the cached UUID if available
-		if bricklinkSet.Id != uuid.Nil {
+		} else {
+			// Use the cached UUID
 			item.Id = bricklinkSet.Id
 		}
+
 		sets = append(sets, item)
 	}
 
