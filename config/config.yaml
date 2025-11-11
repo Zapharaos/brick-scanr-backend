@@ -20,6 +20,13 @@ redis:
   # Default value: "10"
   pool_size: 10
 
+# Mock configuration
+# Enable this to use local mock data instead of real APIs (useful for offline development)
+mocks:
+  # Set to true to enable mock mode, false to use real APIs
+  # Default value: false
+  enabled: false
+
 # Server configuration
 server:
   # Specify the server host

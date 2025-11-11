@@ -5,17 +5,29 @@ import (
 	"time"
 )
 
-// Client handles all BrickLink API interactions
+// Client handles all Pick-a-Brick API interactions
 type Client struct {
 	httpClient *http.Client
+	useMocks   bool
 }
 
-// NewClient creates a new BrickLink client instance
+// NewClient creates a new Pick-a-Brick client instance
 func NewClient() *Client {
 	return &Client{
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		useMocks: false,
+	}
+}
+
+// NewClientWithMocks creates a new Pick-a-Brick client instance with mock mode enabled
+func NewClientWithMocks() *Client {
+	return &Client{
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+		useMocks: true,
 	}
 }
 

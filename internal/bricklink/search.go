@@ -7,11 +7,50 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/Zapharaos/brick-scanr-backend/internal/mocks"
 	"go.uber.org/zap"
 )
 
 // SearchSets searches for LEGO sets on BrickLink
 func (c *Client) SearchSets(query string) ([]SearchItem, error) {
+	// If mock mode is enabled, load from mock file
+	if c.useMocks {
+		zap.L().Info("Using mock data for BrickLink search", zap.String("query", query))
+
+		data, err := mocks.LoadBricklinkSearchMock(query)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load mock search data: %w", err)
+		}
+
+		var searchResp searchResponse
+		if err := mocks.UnmarshalJSON(data, &searchResp); err != nil {
+			return nil, err
+		}
+
+		if searchResp.ReturnCode != 0 {
+			return nil, fmt.Errorf("mock search API returned error code %d: %s",
+				searchResp.ReturnCode, searchResp.ReturnMessage)
+		}
+
+		// Filter for Sets only (type "S")
+		var sets []SearchItem
+		for _, typeList := range searchResp.Result.TypeList {
+			if typeList.Type == "S" {
+				for _, item := range typeList.Items {
+					if item.TypeItem == "S" {
+						sets = append(sets, item)
+					}
+				}
+			}
+		}
+
+		zap.L().Info("Found LEGO sets from mock data",
+			zap.String("query", query),
+			zap.Int("set_count", len(sets)))
+
+		return sets, nil
+	}
+
 	baseURL := "https://www.bricklink.com/ajax/clone/search/searchproduct.ajax"
 	params := url.Values{}
 	params.Add("q", query)

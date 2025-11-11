@@ -48,8 +48,7 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Search through BrickLink
-	client := bricklink.NewClient()
-	bricklinkSets, err := client.SearchSets(query)
+	bricklinkSets, err := bricklink.C().SearchSets(query)
 	if err != nil {
 		zap.L().Error("Failed to search sets",
 			zap.Error(err),

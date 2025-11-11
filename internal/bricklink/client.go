@@ -8,6 +8,7 @@ import (
 // Client handles all BrickLink API interactions
 type Client struct {
 	httpClient *http.Client
+	useMocks   bool
 }
 
 // NewClient creates a new BrickLink client instance
@@ -16,6 +17,17 @@ func NewClient() *Client {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		useMocks: false,
+	}
+}
+
+// NewClientWithMocks creates a new BrickLink client instance with mock mode enabled
+func NewClientWithMocks() *Client {
+	return &Client{
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+		useMocks: true,
 	}
 }
 

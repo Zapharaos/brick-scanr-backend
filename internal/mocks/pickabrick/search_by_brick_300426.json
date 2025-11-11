@@ -1,0 +1,29 @@
+{
+  "data": {
+    "searchElements": {
+      "results": [
+        {
+          "id": "300426",
+          "designId": "3004",
+          "collapseDesignId": "3004",
+          "name": "Brick 1 x 2",
+          "imageUrl": "https://www.lego.com/cdn/product-assets/element.img.lod4photo.192x192/300426.jpg",
+          "maxOrderQuantity": 200,
+          "deliveryChannel": "pick-a-brick",
+          "colorHex": "#FFFFFF",
+          "contrastColorHex": "#000000",
+          "price": {
+            "centAmount": 25,
+            "formattedAmount": "€0.25",
+            "currencyCode": "EUR",
+            "formattedValue": 0.25,
+            "__typename": "Money"
+          },
+          "availability": "available",
+          "__typename": "SearchResultElement"
+        }
+      ]
+    }
+  }
+}
+

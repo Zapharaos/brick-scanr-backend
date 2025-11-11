@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/Zapharaos/brick-scanr-backend/internal/mocks"
 	"go.uber.org/zap"
 	"golang.org/x/text/language"
 )
@@ -33,6 +34,33 @@ type Brick struct {
 
 // FetchBricksByDesignID fetches all bricks matching the designID
 func (c *Client) FetchBricksByDesignID(designID string, locale language.Tag, currency language.Tag) ([]Brick, error) {
+	// If mock mode is enabled, load from mock file
+	if c.useMocks {
+		zap.L().Debug("Using mock data for Pick-a-Brick elements by design ID",
+			zap.String("design_id", designID))
+
+		data, err := mocks.LoadPickabrickElementsByDesignMock(designID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load mock elements data: %w", err)
+		}
+
+		var resp graphQLResponse
+		if err := mocks.UnmarshalJSON(data, &resp); err != nil {
+			return nil, err
+		}
+
+		if len(resp.Errors) > 0 {
+			return nil, fmt.Errorf("mock GraphQL error: %s", resp.Errors[0].Message)
+		}
+
+		zap.L().Debug("Successfully loaded mock Pick-a-Brick elements",
+			zap.String("design_id", designID),
+			zap.Int("count", len(resp.Data.Elements)),
+		)
+
+		return resp.Data.Elements, nil
+	}
+
 	zap.L().Debug("Fetching Pick-a-Brick elements by design ID",
 		zap.String("design_id", designID),
 		zap.String("locale", locale.String()),
@@ -174,6 +202,33 @@ fragment ElementFacetCategory on ElementCategory {
 
 // FetchBricksByBrickID fetches a specific brick by its element ID (brick ID)
 func (c *Client) FetchBricksByBrickID(brickID string, locale language.Tag, currency language.Tag) ([]Brick, error) {
+	// If mock mode is enabled, load from mock file
+	if c.useMocks {
+		zap.L().Debug("Using mock data for Pick-a-Brick element by brick ID",
+			zap.String("brick_id", brickID))
+
+		data, err := mocks.LoadPickabrickSearchByBrickMock(brickID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load mock element data: %w", err)
+		}
+
+		var resp graphQLSearchResponse
+		if err := mocks.UnmarshalJSON(data, &resp); err != nil {
+			return nil, err
+		}
+
+		if len(resp.Errors) > 0 {
+			return nil, fmt.Errorf("mock GraphQL error: %s", resp.Errors[0].Message)
+		}
+
+		zap.L().Debug("Successfully loaded mock Pick-a-Brick element",
+			zap.String("brick_id", brickID),
+			zap.Int("count", len(resp.Data.SearchElements.Results)),
+		)
+
+		return resp.Data.SearchElements.Results, nil
+	}
+
 	zap.L().Debug("Fetching Pick-a-Brick element by brick ID",
 		zap.String("brick_id", brickID),
 		zap.String("locale", locale.String()),
