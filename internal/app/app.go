@@ -5,6 +5,7 @@ import (
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
 	"github.com/Zapharaos/brick-scanr-backend/internal/database"
+	"github.com/Zapharaos/brick-scanr-backend/internal/lego"
 	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
 	"github.com/Zapharaos/brick-scanr-backend/internal/utils"
 	"github.com/spf13/viper"
@@ -40,8 +41,10 @@ func initServices() {
 		zap.L().Warn("🔧 MOCK MODE ENABLED - Using local mock data")
 		bricklink.ReplaceGlobalClient(bricklink.NewClientWithMocks())
 		pickabrick.ReplaceGlobalClient(pickabrick.NewClientWithMocks())
+		lego.ReplaceGlobalClient(lego.NewClientWithMocks())
 	} else {
 		bricklink.ReplaceGlobalClient(bricklink.NewClient())
 		pickabrick.ReplaceGlobalClient(pickabrick.NewClient())
+		lego.ReplaceGlobalClient(lego.NewClient())
 	}
 }

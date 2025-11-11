@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-//go:embed bricklink/*.json bricklink/*.html pickabrick/*.json
+//go:embed bricklink/*.json bricklink/*.html pickabrick/*.json lego/*.json
 var mockFiles embed.FS
 
 // LoadBricklinkSearchMock loads a BrickLink search mock response
@@ -42,6 +42,16 @@ func LoadPickabrickElementsByDesignMock(designID string) ([]byte, error) {
 // LoadPickabrickSearchByBrickMock loads a Pick-a-Brick search by brick ID mock response
 func LoadPickabrickSearchByBrickMock(brickID string) ([]byte, error) {
 	filename := fmt.Sprintf("pickabrick/search_by_brick_%s.json", brickID)
+	data, err := mockFiles.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load mock file %s: %w", filename, err)
+	}
+	return data, nil
+}
+
+// LoadLegoProductDetailsMock loads a LEGO product details mock response
+func LoadLegoProductDetailsMock(slug string) ([]byte, error) {
+	filename := fmt.Sprintf("lego/product_%s.json", slug)
 	data, err := mockFiles.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load mock file %s: %w", filename, err)

@@ -55,3 +55,14 @@ func TestLoadNonExistentMock(t *testing.T) {
 	}
 	t.Logf("Correctly returned error: %v", err)
 }
+
+func TestLoadLegoProductDetailsMock(t *testing.T) {
+	data, err := LoadLegoProductDetailsMock("san-francisco-21043")
+	if err != nil {
+		t.Fatalf("Failed to load mock: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("Mock data is empty")
+	}
+	t.Logf("Successfully loaded %d bytes of mock data", len(data))
+}
