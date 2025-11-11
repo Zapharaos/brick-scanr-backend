@@ -163,12 +163,11 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 			)
 
 			bfull := make([]set.Brick, 0, len(cachedSet.Bricks))
-			fullbatch := setruntime.Progress{} // For pushing full batch if needed, can be used empty
 			bricksNeedingPrices := make([]set.Brick, 0)
 			needsRefetch := false
 
 			// For each brick in the set, retrieve full data from cache and check for missing prices
-			for _, bmin := range cachedSet.Bricks {
+			for idx, bmin := range cachedSet.Bricks {
 
 				// Retrieve brickID - needed to get the brick from cache
 				brickID, err := bmin.GetBrickIDForRedis()
@@ -194,6 +193,13 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 
+				// Set the index to maintain order (use index from cachedSet.Bricks or from brick itself)
+				if bmin.Index >= 0 {
+					brick.Index = bmin.Index
+				} else {
+					brick.Index = idx
+				}
+
 				// Check if we have a price for the requested currency
 				if brick.Prices == nil || len(brick.Prices) == 0 {
 					// No prices at all => the product is probably not available for sale anymore
@@ -203,7 +209,6 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 						zap.String("design_id", string(bmin.DesignID)),
 					)
 					bfull = append(bfull, brick)
-					fullbatch.AddItem(brick)
 					continue
 				}
 
@@ -219,7 +224,6 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 				}
 
 				bfull = append(bfull, brick)
-				fullbatch.AddItem(brick)
 			}
 
 			// If any brick cache expired, trigger a complete re-fetch
@@ -265,9 +269,10 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 			// Create websocket runtime for price fetching
 			rs := h.srh.RunSet(cachedSet)
 
-			// TODO : combine fullbatch and bricksNeedingPrices
-			// We only want to cache minimal bricks in the set, but full bricks are already available without prices
-			h.srh.PushBatchProgress(rs.ID, setruntime.DataTypePickabrickBricks, fullbatch)
+			// TODO : fix because bfull has 193 items but rs ends up with only 162
+			// Add all bricks to the runtime in their original order
+			// bfull contains all bricks (those with and without prices for the requested currency)
+			rs.AddBricks(bfull)
 
 			// Start goroutine to fetch missing prices
 			go func(ctx context.Context, rsID uuid.UUID, bricks []set.Brick, cachedSet set.Set) {
@@ -487,13 +492,16 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 
 		// Map Bricklink inventory to internal set bricks
 		bprogress := setruntime.NewProgress(len(inventory.Items))
-		for _, item := range inventory.Items {
+		for idx, item := range inventory.Items {
 
 			// Try to find in cache first
 			brick, err := set.GetRedisBrick(ctx, set.BrickID(item.ItemIDs[0]), set.DesignID(item.ItemNo))
 			if err != nil {
 				// Not found in cache, map from Bricklink item
 				brick = set.MapBrickFromBricklinkInventoryItem(item)
+
+				// Set the index to maintain order
+				brick.Index = idx
 
 				// Cache the brick
 				if err = set.SetRedisBrick(ctx, brick, 0); err != nil {

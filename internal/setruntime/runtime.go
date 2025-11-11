@@ -3,6 +3,7 @@ package setruntime
 import (
 	"encoding/json"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 
@@ -20,6 +21,11 @@ type RuntimeSet struct {
 	register   chan Client
 	unregister chan uuid.UUID
 	changeChan chan dataChange
+
+	// bricks stores all bricks processed during this runtime (by BrickID+DesignID)
+	// This allows new clients to receive all bricks when joining an ongoing fetch
+	bricks      map[string]set.Brick
+	bricksMutex sync.RWMutex
 
 	opt RuntimeOptions
 
@@ -43,6 +49,8 @@ func NewRuntimeSet(s set.Set, opt RuntimeOptions, wg *sync.WaitGroup, errorLogge
 		register:     make(chan Client, opt.ClientChanCap),
 		unregister:   make(chan uuid.UUID, opt.ClientChanCap),
 		changeChan:   make(chan dataChange, opt.ChangeChanCap),
+		bricks:       make(map[string]set.Brick),
+		bricksMutex:  sync.RWMutex{},
 		done:         make(chan struct{}),
 		wg:           wg,
 	}
@@ -83,6 +91,71 @@ func (rs *RuntimeSet) HasClient(id uuid.UUID) bool {
 	return ok
 }
 
+// AddBrick adds or updates a brick in the runtime set
+func (rs *RuntimeSet) AddBrick(brick set.Brick) {
+	rs.bricksMutex.Lock()
+	defer rs.bricksMutex.Unlock()
+
+	// Create unique key from BrickID and DesignID
+	brickID, err := brick.GetBrickIDForRedis()
+	if err != nil {
+		zap.L().Warn("Failed to get brick ID for runtime storage", zap.Error(err))
+		return
+	}
+	key := string(brickID) + ":" + string(brick.DesignID)
+
+	// Add or update the brick
+	rs.bricks[key] = brick
+}
+
+// AddBricks adds or updates multiple bricks in the runtime set
+func (rs *RuntimeSet) AddBricks(bricks []set.Brick) {
+	rs.bricksMutex.Lock()
+	defer rs.bricksMutex.Unlock()
+
+	count := 0
+	for _, brick := range bricks {
+		// Create unique key from BrickID and DesignID
+		brickID, err := brick.GetBrickIDForRedis()
+		if err != nil {
+			zap.L().Warn("Failed to get brick ID for runtime storage", zap.Error(err))
+			continue
+		}
+		key := string(brickID) + ":" + string(brick.DesignID)
+
+		_, exists := rs.bricks[key]
+		if exists {
+			// Update existing brick if needed (e.g., quantity, price)
+			rs.bricks[key] = brick
+			count++
+		} else {
+			// Add or update the brick
+			rs.bricks[key] = brick
+		}
+	}
+
+	debuug := count
+	debuug++
+}
+
+// GetAllBricks returns all bricks currently stored in the runtime, sorted by index
+func (rs *RuntimeSet) GetAllBricks() []set.Brick {
+	rs.bricksMutex.RLock()
+	defer rs.bricksMutex.RUnlock()
+
+	bricks := make([]set.Brick, 0, len(rs.bricks))
+	for _, brick := range rs.bricks {
+		bricks = append(bricks, brick)
+	}
+
+	// Sort bricks by index to maintain original order from the set
+	sort.Slice(bricks, func(i, j int) bool {
+		return bricks[i].Index < bricks[j].Index
+	})
+
+	return bricks
+}
+
 // logError logs an error message
 func (rs *RuntimeSet) logError(scope string, err error) {
 	if rs.errorLogger == nil || err == nil {
@@ -114,8 +187,6 @@ func (rs *RuntimeSet) stop() {
 // run starts the runtime set
 func (rs *RuntimeSet) run() {
 	rs.wg.Add(1)
-
-	rs.set = set.Set{}
 
 	setActivityTimer := time.NewTimer(rs.opt.Timeout)
 	clientExpire := time.NewTicker(rs.opt.ClientTimeoutCheckFreq)
@@ -247,7 +318,11 @@ func (rs *RuntimeSet) clientFatal(id uuid.UUID, err error) {
 func (rs *RuntimeSet) handleClientConnect(client Client) {
 	rs.registerClient(client)
 
-	// Gather data and set it to the client
+	// Update rs.set.Bricks with all bricks stored in the runtime
+	// This ensures PacketInit contains all bricks fetched so far
+	rs.set.Bricks = rs.GetAllBricks()
+
+	// Send initial packet with set info and all bricks
 	client.SendPacket(NewPacketInit(
 		rs.set,
 	))

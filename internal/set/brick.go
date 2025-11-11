@@ -16,6 +16,7 @@ type BrickMinimal struct {
 	MainID   *BrickID  `json:"main_id"`
 	IDs      []BrickID `json:"ids"`
 	DesignID DesignID  `json:"design_id"`
+	Index    int       `json:"index"`
 }
 
 // GetBrickIDForRedis returns the appropriate BrickID to use as a Redis key

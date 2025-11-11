@@ -99,7 +99,8 @@ func (rs *RuntimeSet) handleDataChangeProgress(change dataChange) {
 			}
 		}
 
-		// TODO : use in rs ?
+		// Store bricks in RuntimeSet for new clients joining later
+		rs.AddBricks(bricks)
 
 		// Determine the batch status
 		var status BatchStatus
