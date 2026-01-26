@@ -2,6 +2,7 @@ package set
 
 import (
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
+	"github.com/Zapharaos/brick-scanr-backend/internal/lego"
 	"github.com/google/uuid"
 	"golang.org/x/text/language"
 )
@@ -38,6 +39,7 @@ type Status int
 const (
 	StatusRetired Status = iota
 	StatusOutOfStock
+	StatusBackorder
 	StatusAvailable
 )
 
@@ -45,6 +47,8 @@ type Set struct {
 	FetchStatus     FetchStatus `json:"fetch_status"`
 	FetchError      *FetchError `json:"fetch_error,omitempty"`
 	Id              uuid.UUID   `json:"id"`
+	LegoURL         string      `json:"lego_url"`
+	Slug            string      `json:"slug"`
 	Name            string      `json:"name"`
 	Number          string      `json:"number"`
 	ImageURL        string      `json:"image_url"`
@@ -57,6 +61,14 @@ type Set struct {
 	Bricks          []Brick `json:"bricks"`
 	BricklinkID     int     `json:"bricklink_id"`
 	BricklinkNumber string  `json:"bricklink_number"`
+}
+
+func (s *Set) BuildLegoURL(locale language.Tag) {
+	s.LegoURL = "https://www.lego.com/" + locale.String() + "product/" + s.Slug
+}
+
+func (s *Set) BuildInstructionsURL(locale language.Tag) {
+	s.InstructionsURL = "https://www.lego.com/" + locale.String() + "/service/building-instructions/" + s.Number
 }
 
 // MapSetFromBricklinkSearch maps a Bricklink search item to an internal Set representation
@@ -74,6 +86,41 @@ func MapSetFromBricklinkSearch(bs bricklink.SearchItem) (Set, error) {
 		BricklinkID:     bs.IDItem,
 		BricklinkNumber: bs.StrItemNo,
 	}, nil
+}
+
+func MapLegoProductStatus(p lego.Product) Status {
+	switch p.Variant.Attributes.AvailabilityStatus {
+	case lego.EAvailable:
+		return StatusAvailable
+	case lego.HOutOfStock:
+		return StatusOutOfStock
+	case lego.FBackorderForDate:
+		return StatusBackorder
+	case lego.RRetired:
+	default:
+		break
+	}
+	return StatusRetired
+}
+
+// GetPriceForLocale returns the price for the given locale tag, or nil if not found
+func (s *Set) GetPriceForLocale(tag language.Tag) *Price {
+	if s.Prices != nil {
+		if price, exists := s.Prices[tag]; exists {
+			return price
+		}
+	}
+	return nil
+}
+
+// ApplyCurrency sets the Set's Price based on the given locale tag
+func (s *Set) ApplyCurrency(tag language.Tag) bool {
+	price := s.GetPriceForLocale(tag)
+	if price == nil {
+		return false
+	}
+	s.Price = *price
+	return true
 }
 
 // DetailsResponse represents the response for a set details request

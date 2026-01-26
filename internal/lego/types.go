@@ -41,6 +41,15 @@ type Price struct {
 	CurrencyCode    string  `json:"currencyCode"`
 }
 
+type AvailabilityStatus int
+
+const (
+	FBackorderForDate = "F_BACKORDER_FOR_DATE"
+	HOutOfStock       = "H_OUT_OF_STOCK"
+	EAvailable        = "E_AVAILABLE"
+	RRetired          = "R_RETIRED"
+)
+
 type ProductAttributes struct {
 	AvailabilityStatus string  `json:"availabilityStatus"`
 	AvailabilityText   string  `json:"availabilityText"`

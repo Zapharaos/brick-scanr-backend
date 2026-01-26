@@ -13,7 +13,7 @@ import (
 )
 
 // FetchProductDetails fetches product details from LEGO's official API using the product slug
-func (c *Client) FetchProductDetails(slug string, locale language.Tag) (*Product, error) {
+func (c *Client) FetchProductDetails(slug string, locale language.Tag, currency language.Tag) (*Product, error) {
 	// If mock mode is enabled, load from mock file
 	if c.useMocks {
 		zap.L().Info("Using mock data for LEGO product details", zap.String("slug", slug))
@@ -77,7 +77,7 @@ func (c *Client) FetchProductDetails(slug string, locale language.Tag) (*Product
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Accept-Language", locale.String()+",en;q=0.9")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-locale", locale.String())
+	req.Header.Set("x-locale", currency.String())
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36")
 	req.Header.Set("Referer", fmt.Sprintf("https://www.lego.com/%s/product/%s", locale.String(), slug))
 	req.Header.Set("sec-fetch-dest", "empty")
@@ -86,7 +86,8 @@ func (c *Client) FetchProductDetails(slug string, locale language.Tag) (*Product
 
 	zap.L().Info("Fetching LEGO product details",
 		zap.String("slug", slug),
-		zap.String("locale", locale.String()))
+		zap.String("locale", locale.String()),
+		zap.String("currency", currency.String()))
 
 	// Execute the request
 	resp, err := c.httpClient.Do(req)
