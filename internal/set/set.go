@@ -3,6 +3,7 @@ package set
 import (
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
 	"github.com/google/uuid"
+	"golang.org/x/text/language"
 )
 
 type FetchStatus int
@@ -19,8 +20,10 @@ type FetchErrorStep int
 const (
 	FetchErrorUnknown FetchErrorStep = iota + 1
 	FetchErrorInitCache
+	FetchErrorDetailsCache
 	FetchErrorBatchCache
 	FetchErrorFinalCache
+	FetchErrorFetchDetails
 	FetchErrorFetchInventory
 	FetchErrorFetchPrices
 )
@@ -30,17 +33,30 @@ type FetchError struct {
 	Step    FetchErrorStep `json:"step"`
 }
 
+type Status int
+
+const (
+	StatusRetired Status = iota
+	StatusOutOfStock
+	StatusAvailable
+)
+
 type Set struct {
 	FetchStatus     FetchStatus `json:"fetch_status"`
 	FetchError      *FetchError `json:"fetch_error,omitempty"`
 	Id              uuid.UUID   `json:"id"`
 	Name            string      `json:"name"`
 	Number          string      `json:"number"`
-	YearReleased    int         `json:"year_released"`
 	ImageURL        string      `json:"image_url"`
-	Bricks          []Brick     `json:"bricks"`
-	BricklinkID     int         `json:"bricklink_id"`
-	BricklinkNumber string      `json:"bricklink_number"`
+	YearReleased    int         `json:"year_released"`
+	Status          Status      `json:"status"`
+	Price           Price       `json:"price"`
+	Prices          map[language.Tag]*Price
+	InstructionsURL string  `json:"instructions_url"`
+	Parts           int     `json:"parts"`
+	Bricks          []Brick `json:"bricks"`
+	BricklinkID     int     `json:"bricklink_id"`
+	BricklinkNumber string  `json:"bricklink_number"`
 }
 
 // MapSetFromBricklinkSearch maps a Bricklink search item to an internal Set representation

@@ -65,3 +65,55 @@ type searchResponse struct {
 	ProcssingTime int          `json:"procssingTime"`
 	StrRefNo      string       `json:"strRefNo"`
 }
+
+// setDetailsResponse represents the response structure from BrickLink's getItemImageList API
+type setDetailsResponse struct {
+	Item          Set    `json:"item"`
+	ReturnCode    int    `json:"returnCode"`
+	ReturnMessage string `json:"returnMessage"`
+	ErrorTicket   int    `json:"errorTicket"`
+	ProcssingTime int    `json:"procssingTime"`
+	StrRefNo      string `json:"strRefNo"`
+}
+
+type Set struct {
+	TypeItem       string    `json:"typeItem"`
+	StrItemName    string    `json:"strItemName"`
+	StrItemNo      string    `json:"strItemNo"`
+	N1Seq          int       `json:"n1Seq"`
+	StrItemNoFull  string    `json:"strItemNoFull"`
+	NYearReleased  int       `json:"nYearReleased"`
+	NInvSetCnt     int       `json:"nInvSetCnt"`
+	NInvPartCnt    int       `json:"nInvPartCnt"`
+	NInvMinifigCnt int       `json:"nInvMinifigCnt"`
+	NInvBookCnt    int       `json:"nInvBookCnt"`
+	NInvGearCnt    int       `json:"nInvGearCnt"`
+	ImageList      ImageList `json:"imglist"`
+	HasLegacyLarge bool      `json:"hasLegacyLarge"`
+}
+
+type ImageType string
+
+const (
+	ImageTypeMain ImageType = "M"
+)
+
+type Image struct {
+	Type       ImageType `json:"type"`
+	Thumb1Url  string    `json:"thumb1_url"`
+	Thumb2Url  string    `json:"thumb2_url"`
+	MainUrl    string    `json:"main_url"`
+	IdColorImg int       `json:"idColorImg"`
+	TypeItem   string    `json:"typeItem"`
+}
+
+type ImageList []Image
+
+func (il ImageList) GetMainImageURL() string {
+	for _, img := range il {
+		if img.Type == ImageTypeMain {
+			return img.MainUrl
+		}
+	}
+	return ""
+}

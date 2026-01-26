@@ -29,6 +29,16 @@ func LoadBricklinkInventoryMock(setNumber string) (string, error) {
 	return string(data), nil
 }
 
+// LoadBricklinkSetDetailsMock loads a BrickLink set details mock response
+func LoadBricklinkSetDetailsMock(itemID string) ([]byte, error) {
+	filename := fmt.Sprintf("bricklink/set_details_%s.json", itemID)
+	data, err := mockFiles.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load mock file %s: %w", filename, err)
+	}
+	return data, nil
+}
+
 // LoadPickabrickElementsByDesignMock loads a Pick-a-Brick elements by design ID mock response
 func LoadPickabrickElementsByDesignMock(designID string) ([]byte, error) {
 	filename := fmt.Sprintf("pickabrick/elements_by_design_%s.json", designID)

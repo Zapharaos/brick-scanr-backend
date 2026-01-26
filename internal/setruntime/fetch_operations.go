@@ -155,14 +155,11 @@ func (h *Handler) FetchCompleteSetDetails(
 	}
 	h.PushChange(rsID, setID, DataTypeSet, DataTypeCreated)
 
-	// TODO : ISSUE #3 - Set details
-	/* err = set.SetRedisSet(ctx, cpRedisSet, 0)
-	if err != nil {
-		handleFatalError(setruntime.DataTypeSet, err, "Failed to update Redis set inventory",
-			zap.String("set_id", setId.String()))
-		return
+	// TODO : async ?
+	// Fetch set details
+	if err := h.fetchDetails(ctx, rsID, setID, &cpRedisSet, locale, currency); err != nil {
+		return // Error already handled
 	}
-	h.srh.PushChange(rs.ID, setId, setruntime.DataTypeSet, setruntime.DataTypeUpdated)*/
 
 	// Fetch inventory from BrickLink
 	if err := h.fetchInventory(ctx, rsID, setID, &cpRedisSet); err != nil {
@@ -189,6 +186,38 @@ func (h *Handler) FetchCompleteSetDetails(
 		zap.String("runtime_id", rsID.String()),
 		zap.String("set_id", setID.String()),
 	)
+}
+
+// fetchDetails fetches the details for a set
+func (h *Handler) fetchDetails(ctx context.Context, rsID uuid.UUID, setID uuid.UUID, cpRedisSet *set.Set, locale language.Tag, currency language.Tag) error {
+	// Fetch set details from BrickLink
+	bricklinkSet, err := bricklink.C().FetchSetDetails(cpRedisSet.BricklinkID)
+	if err != nil {
+		// Failed to fetch details => FATAL
+		handleFatalError(h, rsID, setID, set.FetchErrorFetchDetails, *cpRedisSet, DataTypeBricklinkDetails, err,
+			"Failed to fetch details from BrickLink")
+		return err
+	}
+
+	// Update cpRedisSet with fetched details
+	cpRedisSet.Number = bricklinkSet.StrItemNo
+	cpRedisSet.YearReleased = bricklinkSet.NYearReleased
+	cpRedisSet.Parts = bricklinkSet.NInvPartCnt
+	cpRedisSet.ImageURL = bricklinkSet.ImageList.GetMainImageURL()
+
+	err = set.SetRedisSet(ctx, *cpRedisSet, 0)
+	if err != nil {
+		handleFatalError(h, rsID, setID, set.FetchErrorDetailsCache, *cpRedisSet, DataTypeSet, err,
+			"Failed to update Redis set inventory")
+		return err
+	}
+	h.PushChange(rsID, setID, DataTypeSet, DataTypeUpdated)
+
+	// TODO : ISSUE #3 - Lego
+
+	// TODO : ISSUE #3 - Instructions : https://www.lego.com/fr-fr/service/building-instructions/21068
+
+	return nil
 }
 
 // fetchInventory fetches the inventory for a set from BrickLink

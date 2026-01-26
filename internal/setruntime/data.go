@@ -12,6 +12,7 @@ type DataChangeReason uint8
 
 const (
 	DataTypeSet DataType = iota
+	DataTypeBricklinkDetails
 	DataTypeBricklinkBricks
 	DataTypePickabrickBricks
 )
