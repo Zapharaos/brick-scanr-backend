@@ -16,9 +16,8 @@ import (
 	"golang.org/x/text/language"
 )
 
-// todo : v3 - rate limiting
-// todo : v3 - determine TTLs? in config file?
-// todo : v3 - implement retry mechanism for setRedis?
+// todo : ISSUE #8 - Async : determine TTLs? in config file?
+// todo : ISSUE #8 - Async : implement retry mechanism for setRedis?
 
 // SearchSets godoc
 //
@@ -46,6 +45,8 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 		render.BadRequest(w, r, fmt.Errorf("query parameter is required"))
 		return
 	}
+
+	// TODO : ISSUE #1 - Search Alternate Items
 
 	// Search through BrickLink
 	bricklinkSets, err := bricklink.C().SearchSets(query)
@@ -167,7 +168,7 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		return
 
 	case setruntime.CacheStatusFetching:
-		// TODO: but is it fetching prices for the same currency?
+		// todo: ISSUE #9 - Currency : user1 fetches for currency1, but user2 might request a different currency
 		// Data is currently being fetched, return existing websocket
 		h.handleFetchingStatus(w, r, setId, cacheResult.Set)
 		return
@@ -187,6 +188,7 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 func (h Handler) handlePriceFetch(w http.ResponseWriter, r *http.Request, setId uuid.UUID, cacheResult *setruntime.CacheCheckResult, locale, currency language.Tag) {
 	// Check if there's already a runtime for this set
 	if rs, ok := h.srh.FindRuntimeSetBySetId(setId); ok {
+		// todo: ISSUE #9 - Currency : check if the requested currency matches?
 		// Return existing websocket
 		render.Accepted(w, r, set.DetailsResponse{
 			Completed:   false,
@@ -199,7 +201,7 @@ func (h Handler) handlePriceFetch(w http.ResponseWriter, r *http.Request, setId 
 	rs := h.srh.RunSet(cacheResult.Set)
 
 	// Add all bricks to the runtime in their original order
-	// TODO : fix because bfull has 193 items but rs ends up with only 162
+	// todo : ISSUE #9 - Currency : fix because bfull has 193 items but rs ends up with only 162
 	rs.AddBricks(cacheResult.FullBricks)
 
 	// Start goroutine to fetch missing prices
@@ -229,6 +231,9 @@ func (h Handler) handleFetchingStatus(w http.ResponseWriter, r *http.Request, se
 		})
 		return
 	}
+
+	// TODO : investigate why this happens
+	// maybe fetching was over by the time it got here, or is it because an error occurred ?
 
 	// Inconsistent state: set marked as fetching but no runtime set found
 	zap.L().Warn("Inconsistent state: set marked as fetching but no runtime set found",

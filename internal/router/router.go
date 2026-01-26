@@ -61,12 +61,16 @@ func New(setHandler *setruntime.Handler) *Router {
 		r.Use(mid.LocaleMiddleware)
 		r.Use(mid.CurrencyMiddleware)
 
+		// todo : ISSUE #2 - Rate Limiting Middleware
+
 		r.Route("/set", func(r chi.Router) {
 			r.Get("/search/{query}", handlers.SearchSets)
 
 			// Details
 			r.Post("/details/{id}", router.handler.FetchSetDetails)
 			r.Get("/details/ws/{id}", router.handler.SetDetailsWebSocket)
+
+			// todo : ISSUE #7 - Set scan export
 		})
 	})
 

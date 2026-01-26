@@ -1,31 +1,29 @@
 package setruntime
 
-// todo : v3 - modulable batch size? use config value?
-
-const ProgressBatchSize = 10
-
 // Progress tracks batch processing progress with generic items
 type Progress struct {
 	Total     int   `json:"total"` // Total items to process
 	Done      int   `json:"done"`  // Items completed (sent in previous batches)
 	Items     []any `json:"items"` // Current batch items (can be any type)
 	BatchCurr int   `json:"-"`     // Current batch counter (not serialized)
+	BatchSize int   `json:"-"`     // Batch size limit (not serialized)
 }
 
 // NewProgress creates a new progress tracker
-func NewProgress(total int) *Progress {
+func NewProgress(total int, batchSize int) *Progress {
 	return &Progress{
 		Total:     total,
 		Done:      0,
 		Items:     []any{},
 		BatchCurr: 0,
+		BatchSize: batchSize,
 	}
 }
 
 // HasReachedBatchLimit checks if the current batch has reached the batch size limit
 func (p *Progress) HasReachedBatchLimit() bool {
 	totalCurr := p.Done + p.BatchCurr
-	return p.BatchCurr >= ProgressBatchSize || totalCurr >= p.Total
+	return p.BatchCurr >= p.BatchSize || totalCurr >= p.Total
 }
 
 // Increment increments the current batch counter and total processed counter

@@ -42,6 +42,7 @@ const (
 // CheckCachedSetData checks Redis cache for set data and determines what action is needed
 func CheckCachedSetData(ctx context.Context, setID uuid.UUID, currency language.Tag) (*CacheCheckResult, error) {
 	// Try to get cached set
+	// todo : ISSUE #8 - Async : check concurrency here
 	cachedSet, err := set.GetRedisSet(ctx, setID)
 	if err != nil {
 		return &CacheCheckResult{Status: CacheStatusMissing}, nil
@@ -62,6 +63,7 @@ func CheckCachedSetData(ctx context.Context, setID uuid.UUID, currency language.
 		return checkCompletedSetCache(ctx, cachedSet, setID, currency)
 
 	default:
+		// TODO : make sure that new user joining ongoing fetch doesnt miss out on data
 		// FetchStatusPending or FetchStatusFetching
 		zap.L().Info("Set details currently being fetched",
 			zap.String("set_id", setID.String()),
@@ -94,6 +96,7 @@ func checkCompletedSetCache(ctx context.Context, cachedSet set.Set, setID uuid.U
 			continue
 		}
 
+		// todo : ISSUE #8 - Async : check concurrency here
 		// Try to find brick in cache
 		brick, err := set.GetRedisBrick(ctx, brickID, brickMin.DesignID)
 		if err != nil {

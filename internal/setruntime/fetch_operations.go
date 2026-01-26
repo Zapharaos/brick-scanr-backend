@@ -30,7 +30,8 @@ func (h *Handler) FetchPricesForBricks(
 	)
 
 	// Initialize progress tracker
-	bprogress := NewProgress(len(bricks))
+	rs := h.GetRuntimeSet(rsID)
+	bprogress := NewProgress(len(bricks), rs.opt.ProgressBatchSize)
 
 	// Fetch prices for each brick needing updates
 	for _, brick := range bricks {
@@ -154,7 +155,7 @@ func (h *Handler) FetchCompleteSetDetails(
 	}
 	h.PushChange(rsID, setID, DataTypeSet, DataTypeCreated)
 
-	// TODO : fetch set
+	// TODO : ISSUE #3 - Set details
 	/* err = set.SetRedisSet(ctx, cpRedisSet, 0)
 	if err != nil {
 		handleFatalError(setruntime.DataTypeSet, err, "Failed to update Redis set inventory",
@@ -201,7 +202,8 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 	}
 
 	// Map BrickLink inventory to internal set bricks
-	bprogress := NewProgress(len(inventory.Items))
+	rs := h.GetRuntimeSet(rsID)
+	bprogress := NewProgress(len(inventory.Items), rs.opt.ProgressBatchSize)
 	for idx, item := range inventory.Items {
 		// Try to find in cache first
 		brick, err := set.GetRedisBrick(ctx, set.BrickID(item.ItemIDs[0]), set.DesignID(item.ItemNo))
@@ -221,7 +223,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 			}
 		}
 
-		// TODO : brick already cached? update it's TTL to match set's TTL
+		// todo : ISSUE #8 - Async : brick already cached? update it's TTL to match set's TTL
 		// But then there is a risk that the price might become outdated at some point
 		// Use price TTL ? Limit the amount of TTL postponements? Limit TTL regarding a brick.created_at field?
 
@@ -259,8 +261,10 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 // fetchPrices fetches prices for all bricks in a set from Pick-a-Brick
 func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UUID, cpRedisSet *set.Set, locale language.Tag, currency language.Tag) error {
 	bmap := set.NewBrickMap(cpRedisSet.Bricks)
-	bprogress := NewProgress(len(bmap.BricksByDesign))
+	rs := h.GetRuntimeSet(rsID)
+	bprogress := NewProgress(len(bmap.BricksByDesign), rs.opt.ProgressBatchSize)
 
+	// TODO : ISSUE #1 - Search Alternate Items
 	// todo : optimize
 	// todo : process seems slow and inefficient
 	for designID := range bmap.BricksByDesign {
@@ -323,6 +327,8 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 			bprogress.CompleteBatch()
 		}
 	}
+
+	// TODO : fix - total is way smaller than actual processed items, making progress percentage incorrect
 
 	// Send final batch if there are remaining items
 	if bprogress.BatchCurr > 0 {
