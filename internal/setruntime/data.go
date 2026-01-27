@@ -100,7 +100,6 @@ func (rs *RuntimeSet) handleDataChangeProgress(change dataChange) {
 			}
 		}
 
-		// todo : ISSUE #8 - Async : make sure this is working as intended
 		// Store bricks in RuntimeSet for new clients joining later
 		rs.AddBricks(bricks)
 

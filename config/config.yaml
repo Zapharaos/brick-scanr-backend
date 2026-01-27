@@ -136,6 +136,15 @@ cors:
   # Default value: 300
   max_age: 300
 
+# Rate limiting configuration
+rate_limit:
+
+  # Set details endpoint
+  # Default value: 10 requests per 60 seconds
+  set_details:
+    requests: 10
+    window: 60
+
 # Set runtime configuration
 setruntime:
   # Channel capacity for client connections

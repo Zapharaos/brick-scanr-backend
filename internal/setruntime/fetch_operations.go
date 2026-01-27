@@ -74,6 +74,7 @@ func (h *Handler) FetchPricesForBricks(
 				// Update brick with fetched price
 				pbp := set.MapPriceFromPickabrick(mb.Price)
 				pbp.ItemID = string(brickID)
+				pbp.FetchedAt = time.Now().UnixMilli()
 				if brick.Prices == nil {
 					brick.Prices = make(map[language.Tag]*set.Price)
 				}
@@ -160,7 +161,7 @@ func (h *Handler) FetchCompleteSetDetails(
 
 	// Use WaitGroup to track async operations and mutex for safe Redis writes
 	var wg sync.WaitGroup
-	// TODO : ISSUE #8 - Async : remove mutex here and look to apply redis Lock for set + bricks + others if needed
+	// TODO : ISSUE #8 - Async : remove mutex, use redis Lock instead? does it makes sense to add retry mechanism on top ?
 	var setMutex sync.Mutex // Protects concurrent Redis writes to cpRedisSet
 	var detailsErr error
 
@@ -423,8 +424,7 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 	bprogress := NewProgress(len(bmap.BricksByDesign), rs.opt.ProgressBatchSize)
 
 	// TODO : ISSUE #1 - Search Alternate Items
-	// todo : optimize
-	// todo : process seems slow and inefficient
+	// TODO : ISSUE #8 - Async : make inventory fetching async if possible
 	for designID := range bmap.BricksByDesign {
 		// Fetch bricks by designID
 		matchingBricks, err := pickabrick.C().FetchBricksByDesignID(string(designID), locale, currency)

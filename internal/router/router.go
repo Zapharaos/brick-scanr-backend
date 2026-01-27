@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/go-chi/httprate"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
@@ -61,13 +62,14 @@ func New(setHandler *setruntime.Handler) *Router {
 		r.Use(mid.LocaleMiddleware)
 		r.Use(mid.CurrencyMiddleware)
 
-		// todo : ISSUE #2 - Rate Limiting Middleware
-
 		r.Route("/set", func(r chi.Router) {
 			r.Get("/search/{query}", handlers.SearchSets)
 
 			// Details
-			r.Post("/details/{id}", router.handler.FetchSetDetails)
+			r.With(httprate.LimitByIP(
+				viper.GetInt("rate_limit.set_details.requests"),
+				viper.GetDuration("rate_limit.set_details.window")*time.Second,
+			)).Post("/details/{id}", router.handler.FetchSetDetails)
 			r.Get("/details/ws/{id}", router.handler.SetDetailsWebSocket)
 
 			// todo : ISSUE #7 - Set scan export

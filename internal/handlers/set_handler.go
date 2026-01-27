@@ -16,8 +16,6 @@ import (
 	"golang.org/x/text/language"
 )
 
-// todo : ISSUE #8 - Async : implement retry mechanism for setRedis?
-
 // SearchSets godoc
 //
 //	@Id				SearchSets
@@ -234,7 +232,7 @@ func (h Handler) handleFetchingStatus(w http.ResponseWriter, r *http.Request, se
 		return
 	}
 
-	// TODO : investigate why this happens
+	// TODO : NOW investigate why this happens
 	// maybe fetching was over by the time it got here, or is it because an error occurred ?
 
 	// Inconsistent state: set marked as fetching but no runtime set found
