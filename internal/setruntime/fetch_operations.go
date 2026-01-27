@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
+	"github.com/Zapharaos/brick-scanr-backend/internal/database"
 	"github.com/Zapharaos/brick-scanr-backend/internal/lego"
 	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
@@ -79,7 +80,7 @@ func (h *Handler) FetchPricesForBricks(
 				brick.Prices[currency] = &pbp
 
 				// Cache the updated brick
-				if err = set.SetRedisBrick(ctx, brick, 0); err != nil {
+				if err = set.SetRedisBrick(ctx, brick, false); err != nil {
 					zap.L().Warn("Failed to cache updated brick price",
 						zap.Error(err),
 						zap.String("brick_id", string(brickID)),
@@ -148,7 +149,7 @@ func (h *Handler) FetchCompleteSetDetails(
 
 	// Cache the status => for concurrent access to the websocket
 	cpRedisSet.FetchStatus = set.FetchStatusFetching
-	err := set.SetRedisSet(ctx, cpRedisSet, 0)
+	err := set.SetRedisSet(ctx, cpRedisSet, true)
 	if err != nil {
 		// Failed to update the set in cache => FATAL
 		handleFatalError(h, rsID, setID, set.FetchErrorInitCache, cpRedisSet, DataTypeSet, err,
@@ -199,7 +200,7 @@ func (h *Handler) FetchCompleteSetDetails(
 	// Mark set fetch completed
 	setMutex.Lock()
 	cpRedisSet.FetchStatus = set.FetchStatusCompleted
-	err = set.SetRedisSet(ctx, cpRedisSet, 0)
+	err = set.SetRedisSet(ctx, cpRedisSet, true)
 	setMutex.Unlock()
 	if err != nil {
 		// Failed to cache the final version => FATAL
@@ -235,7 +236,7 @@ func (h *Handler) fetchDetailsAsync(ctx context.Context, rsID uuid.UUID, setID u
 	cpRedisSet.Parts = bricklinkSet.NInvPartCnt
 	cpRedisSet.ImageURL = bricklinkSet.ImageList.GetMainImageURL()
 
-	err = set.SetRedisSet(ctx, *cpRedisSet, 0)
+	err = set.SetRedisSet(ctx, *cpRedisSet, true)
 	if err != nil {
 		handleFatalError(h, rsID, setID, set.FetchErrorDetailsCache, *cpRedisSet, DataTypeSet, err,
 			"Failed to update Redis set with BrickLink details")
@@ -273,7 +274,7 @@ func (h *Handler) fetchDetailsAsync(ctx context.Context, rsID uuid.UUID, setID u
 	cpRedisSet.Prices[currency] = &lp
 	cpRedisSet.ApplyCurrency(currency)
 
-	err = set.SetRedisSet(ctx, *cpRedisSet, 0)
+	err = set.SetRedisSet(ctx, *cpRedisSet, true)
 	if err != nil {
 		handleFatalError(h, rsID, setID, set.FetchErrorDetailsCache, *cpRedisSet, DataTypeSet, err,
 			"Failed to update Redis set with LEGO details")
@@ -303,7 +304,7 @@ func (h *Handler) fetchDetails(ctx context.Context, rsID uuid.UUID, setID uuid.U
 	cpRedisSet.Parts = bricklinkSet.NInvPartCnt
 	cpRedisSet.ImageURL = bricklinkSet.ImageList.GetMainImageURL()
 
-	err = set.SetRedisSet(ctx, *cpRedisSet, 0)
+	err = set.SetRedisSet(ctx, *cpRedisSet, true)
 	if err != nil {
 		handleFatalError(h, rsID, setID, set.FetchErrorDetailsCache, *cpRedisSet, DataTypeSet, err,
 			"Failed to update Redis set inventory")
@@ -329,13 +330,14 @@ func (h *Handler) fetchDetails(ctx context.Context, rsID uuid.UUID, setID uuid.U
 
 		// Update set with fetched price
 		lp := set.MapPriceFromLego(legoProduct.Variant.Price)
+		lp.FetchedAt = time.Now().UnixMilli()
 		if cpRedisSet.Prices == nil {
 			cpRedisSet.Prices = make(map[language.Tag]*set.Price)
 		}
 		cpRedisSet.Prices[currency] = &lp
 		cpRedisSet.ApplyCurrency(currency)
 
-		err = set.SetRedisSet(ctx, *cpRedisSet, 0)
+		err = set.SetRedisSet(ctx, *cpRedisSet, true)
 		if err != nil {
 			handleFatalError(h, rsID, setID, set.FetchErrorDetailsCache, *cpRedisSet, DataTypeSet, err,
 				"Failed to update Redis set inventory")
@@ -357,6 +359,8 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 		return err
 	}
 
+	// TODO : ISSUE #8 - Async : make inventory fetching async if possible
+
 	// Map BrickLink inventory to internal set bricks
 	rs := h.GetRuntimeSet(rsID)
 	bprogress := NewProgress(len(inventory.Items), rs.opt.ProgressBatchSize)
@@ -368,21 +372,18 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 			// Not found in cache, map from BrickLink item
 			brick = set.MapBrickFromBricklinkInventoryItem(item)
 
+			// TODO : ISSUE #1 : Alternate items - cannot have index for a brick because this is related to a set
 			// Set the index to maintain order
 			brick.Index = idx
-
-			// Cache the brick
-			if err = set.SetRedisBrick(ctx, brick, 0); err != nil {
-				zap.L().Warn("Failed to cache brick",
-					zap.Error(err),
-					zap.String("brick_design_id", item.ItemNo),
-				)
-			}
 		}
 
-		// todo : ISSUE #8 - Async : brick already cached? update it's TTL to match set's TTL
-		// But then there is a risk that the price might become outdated at some point
-		// Use price TTL ? Limit the amount of TTL postponements? Limit TTL regarding a brick.created_at field?
+		// Cache the brick : either for the first time, or to refresh the TTL
+		if err = set.SetRedisBrick(ctx, brick, true); err != nil {
+			zap.L().Warn("Failed to cache brick",
+				zap.Error(err),
+				zap.String("brick_design_id", item.ItemNo),
+			)
+		}
 
 		// Update set copy with brick
 		cpRedisSet.Bricks = append(cpRedisSet.Bricks, brick)
@@ -402,7 +403,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 			bprogress.CompleteBatch()
 
 			// Update set in cache
-			err = set.SetRedisSet(ctx, *cpRedisSet, 0)
+			err = set.SetRedisSet(ctx, *cpRedisSet, true)
 			if err != nil {
 				// Fatal error - inventory is essential
 				handleFatalError(h, rsID, setID, set.FetchErrorBatchCache, *cpRedisSet, DataTypeSet, err,
@@ -445,22 +446,24 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 				continue
 			}
 
-			// Check if currency price is already set
+			// Check if currency price is already set and valid
 			price := brick.GetPriceForLocale(currency)
-			if price != nil && brick.Price.CentAmount != 0 && price.CentAmount < mb.Price.CentAmount {
+			if price.IsValid() && price.IsLower(mb.Price.CentAmount) &&
+				!price.IsOutdated(database.DB().Redis().TTLS.BrickPrice) {
 				continue
 			}
 
 			// Update brick with fetched price
 			pbp := set.MapPriceFromPickabrick(mb.Price)
 			pbp.ItemID = string(brickID)
+			pbp.FetchedAt = time.Now().UnixMilli()
 			if brick.Prices == nil {
 				brick.Prices = make(map[language.Tag]*set.Price)
 			}
 			brick.Prices[currency] = &pbp
 
 			// Update brick in cache
-			if err = set.SetRedisBrick(ctx, brick, 0); err != nil {
+			if err = set.SetRedisBrick(ctx, brick, false); err != nil {
 				zap.L().Warn("Failed to update brick price in cache",
 					zap.Error(err),
 					zap.String("brick_design_id", string(designID)),
@@ -509,7 +512,7 @@ func handleFatalError(h *Handler, rsID uuid.UUID, setID uuid.UUID, step set.Fetc
 	}
 
 	// Try to update cache - best effort, don't fail if this fails
-	_ = set.SetRedisSet(context.Background(), data, time.Hour) // Short TTL for failed states
+	_ = set.SetRedisSet(context.Background(), data, false) // Short TTL for failed states
 
 	// Notify all connected clients
 	h.PushChange(rsID, setID, dataType, DataTypeFailed)

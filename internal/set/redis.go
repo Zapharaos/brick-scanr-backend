@@ -80,7 +80,7 @@ func BuildKeySetIDToBricklinkID(setID uuid.UUID) string {
 }
 
 func BuildKeyBrick(brickID BrickID, designID DesignID) string {
-	return fmt.Sprintf("brick:%s:%s", brickID, designID)
+	return fmt.Sprintf("brick:%s:%s", designID, brickID)
 }
 
 // GetRedisSet retrieves a Set from Redis by its UUID
@@ -202,7 +202,7 @@ func GetRedisBrick(ctx context.Context, brickID BrickID, designID DesignID) (Bri
 // SetRedisBricklinkSet stores a Set in Redis by its Bricklink ID and also maps the Set ID to the Bricklink ID
 // Uses distributed locking to ensure only one UUID is generated per BrickLink ID across concurrent requests
 // Returns the final Set (with consistent UUID) and a boolean indicating if this call created the entry
-func SetRedisBricklinkSet(ctx context.Context, set Set, ttl time.Duration) (Set, bool, error) {
+func SetRedisBricklinkSet(ctx context.Context, set Set) (Set, bool, error) {
 	bricklinkID := fmt.Sprintf("%d", set.BricklinkID)
 
 	// Create a distributed lock for this specific BrickLink ID
@@ -266,11 +266,11 @@ func SetRedisBricklinkSet(ctx context.Context, set Set, ttl time.Duration) (Set,
 
 	// Store BrickLink ID -> Set mapping
 	keyBricklinkIDToSet := BuildKeyBricklinkIDToSet(bricklinkID)
-	tx.Set(ctx, keyBricklinkIDToSet, setJSON, ttl)
+	tx.Set(ctx, keyBricklinkIDToSet, setJSON, database.DB().Redis().TTLS.Set)
 
 	// Store Set ID -> BrickLink ID mapping (for reverse lookup)
 	keySetIDToBricklinkID := BuildKeySetIDToBricklinkID(set.Id)
-	tx.Set(ctx, keySetIDToBricklinkID, set.BricklinkID, ttl)
+	tx.Set(ctx, keySetIDToBricklinkID, set.BricklinkID, database.DB().Redis().TTLS.Set)
 
 	// Execute transaction
 	if _, err := tx.Exec(ctx); err != nil {
@@ -290,7 +290,7 @@ func SetRedisBricklinkSet(ctx context.Context, set Set, ttl time.Duration) (Set,
 	return set, true, nil
 }
 
-func SetRedisSet(ctx context.Context, set Set, ttl time.Duration) error {
+func SetRedisSet(ctx context.Context, set Set, updateTTL bool) error {
 	// Marshal set to JSON
 	setJSON, err := json.Marshal(set)
 	if err != nil {
@@ -299,6 +299,14 @@ func SetRedisSet(ctx context.Context, set Set, ttl time.Duration) error {
 			zap.String("set_id", set.Id.String()),
 		)
 		return err
+	}
+
+	// Determine TTL
+	var ttl time.Duration
+	if updateTTL {
+		ttl = database.DB().Redis().TTLS.Set
+	} else {
+		ttl = redis.KeepTTL
 	}
 
 	key := BuildKeySet(set.Id)
@@ -310,7 +318,7 @@ func SetRedisSet(ctx context.Context, set Set, ttl time.Duration) error {
 }
 
 // SetRedisBrick stores a Brick in Redis by its BrickID and currency
-func SetRedisBrick(ctx context.Context, brick Brick, ttl time.Duration) error {
+func SetRedisBrick(ctx context.Context, brick Brick, updateTTL bool) error {
 	id, err := brick.GetBrickIDForRedis()
 	if err != nil {
 		zap.L().Error("failed to get brick ID for redis",
@@ -328,6 +336,14 @@ func SetRedisBrick(ctx context.Context, brick Brick, ttl time.Duration) error {
 			zap.String("designID", string(brick.DesignID)),
 		)
 		return err
+	}
+
+	// Determine TTL
+	var ttl time.Duration
+	if updateTTL {
+		ttl = database.DB().Redis().TTLS.Brick
+	} else {
+		ttl = redis.KeepTTL
 	}
 
 	key := BuildKeyBrick(id, brick.DesignID)

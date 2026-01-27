@@ -16,7 +16,6 @@ import (
 	"golang.org/x/text/language"
 )
 
-// todo : ISSUE #8 - Async : determine TTLs? in config file?
 // todo : ISSUE #8 - Async : implement retry mechanism for setRedis?
 
 // SearchSets godoc
@@ -78,7 +77,7 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, set.ErrKeyNotFound) {
 			// Not found in cache, store it atomically
 			// This will return the canonical set (with consistent UUID) even if another goroutine wins the race
-			canonicalSet, _, err := set.SetRedisBricklinkSet(r.Context(), item, 0)
+			canonicalSet, _, err := set.SetRedisBricklinkSet(r.Context(), item)
 			if err != nil {
 				// Failed to cache set, log but continue with the item we have
 				zap.L().Warn("Failed to cache set in Redis",
@@ -155,6 +154,8 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 	// Handle based on cache status
 	switch cacheResult.Status {
 	case setruntime.CacheStatusComplete:
+		// TODO : update the lego set price if outdated
+		// TODO : update the pickabrick brick prices if outdated
 		// Data is fully cached and ready to return
 		render.Accepted(w, r, set.DetailsResponse{
 			Completed: true,
@@ -163,6 +164,7 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		return
 
 	case setruntime.CacheStatusNeedsPrices:
+		// TODO : update the lego set price if outdated
 		// Data is cached but needs price updates for requested currency
 		h.handlePriceFetch(w, r, setId, cacheResult, locale, currency)
 		return

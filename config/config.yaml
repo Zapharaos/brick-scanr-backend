@@ -20,6 +20,24 @@ redis:
   # Default value: "10"
   pool_size: 10
 
+  ttls:
+
+    # Time to live for set metadata in seconds (design doesn't change often)
+    # Default value: 2592000 (30 days)
+    set: 2592000
+
+    # Time to live for set price data in seconds (prices fluctuate more)
+    # Default value: 86400 (24 hours)
+    set_price: 86400
+
+    # Time to live for brick metadata in seconds (design rarely changes)
+    # Default value: 2592000 (30 days)
+    brick: 2592000
+
+    # Time to live for brick price data in seconds (prices can change)
+    # Default value: 86400 (24 hours)
+    brick_price: 86400
+
 # Mock configuration
 # Enable this to use local mock data instead of real APIs (useful for offline development)
 mocks:

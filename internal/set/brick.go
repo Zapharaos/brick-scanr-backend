@@ -42,6 +42,8 @@ func (bm *BrickMinimal) GetBrickIDForRedis() (BrickID, error) {
 	return keyID, nil
 }
 
+// TODO : ISSUE #1 : Alternate items - cannot have index + quantity for a brick because this is related to a set
+
 type Brick struct {
 	BrickMinimal
 	Name     string `json:"name"`

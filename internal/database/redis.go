@@ -15,6 +15,14 @@ import (
 type RedisDB struct {
 	Client  *redis.Client
 	Redsync *redsync.Redsync
+	TTLS    TTLS
+}
+
+type TTLS struct {
+	Set        time.Duration
+	SetPrice   time.Duration
+	Brick      time.Duration
+	BrickPrice time.Duration
 }
 
 // NewRedisDB creates a new Redis client.
@@ -48,11 +56,20 @@ func NewRedisDB() RedisDB {
 	pool := goredis.NewPool(client)
 	rs := redsync.New(pool)
 
+	// Load TTL settings, converted from seconds to time.Duration
+	ttls := TTLS{
+		Set:        viper.GetDuration("redis.ttls.set") * time.Second,
+		SetPrice:   viper.GetDuration("redis.ttls.set_price") * time.Second,
+		Brick:      viper.GetDuration("redis.ttls.brick") * time.Second,
+		BrickPrice: viper.GetDuration("redis.ttls.brick_price") * time.Second,
+	}
+
 	zap.L().Info("Connected to Redis")
 
 	return RedisDB{
 		Client:  client,
 		Redsync: rs,
+		TTLS:    ttls,
 	}
 }
 
