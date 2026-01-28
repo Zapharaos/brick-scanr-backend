@@ -512,7 +512,7 @@ func handleFatalError(h *Handler, rsID uuid.UUID, setID uuid.UUID, step set.Fetc
 	}
 
 	// Try to update cache - best effort, don't fail if this fails
-	_ = set.SetRedisSet(context.Background(), data, false) // Short TTL for failed states
+	_ = set.SetRedisSet(context.Background(), data, false)
 
 	// Notify all connected clients
 	h.PushChange(rsID, setID, dataType, DataTypeFailed)

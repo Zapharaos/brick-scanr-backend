@@ -20,6 +20,20 @@ redis:
   # Default value: "10"
   pool_size: 10
 
+  # Distributed lock configuration (using Redsync)
+  lock:
+    # Time after which a lock automatically expires to prevent deadlocks (in seconds)
+    # Default value: 5
+    expiry: 5
+
+    # Delay between lock acquisition retry attempts (in milliseconds)
+    # Default value: 100
+    retry_delay: 100
+
+    # Number of times to retry acquiring a lock before giving up
+    # Default value: 30 (30 * 100ms = 3 seconds total wait time)
+    tries: 30
+
   ttls:
 
     # Time to live for set metadata in seconds (design doesn't change often)

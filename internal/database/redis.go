@@ -16,6 +16,7 @@ type RedisDB struct {
 	Client  *redis.Client
 	Redsync *redsync.Redsync
 	TTLS    TTLS
+	Lock    LockConfig
 }
 
 type TTLS struct {
@@ -23,6 +24,12 @@ type TTLS struct {
 	SetPrice   time.Duration
 	Brick      time.Duration
 	BrickPrice time.Duration
+}
+
+type LockConfig struct {
+	Expiry     time.Duration
+	RetryDelay time.Duration
+	Tries      int
 }
 
 // NewRedisDB creates a new Redis client.
@@ -64,12 +71,27 @@ func NewRedisDB() RedisDB {
 		BrickPrice: viper.GetDuration("redis.ttls.brick_price") * time.Second,
 	}
 
+	// Load lock configuration settings
+	lockConfig := LockConfig{
+		Expiry:     viper.GetDuration("redis.lock.expiry") * time.Second,
+		RetryDelay: viper.GetDuration("redis.lock.retry_delay") * time.Millisecond,
+		Tries:      viper.GetInt("redis.lock.tries"),
+	}
+
+	zap.L().Info("Loaded Redis lock configuration",
+		zap.Duration("expiry", lockConfig.Expiry),
+		zap.Duration("retry_delay", lockConfig.RetryDelay),
+		zap.Int("tries", lockConfig.Tries),
+		zap.Duration("max_wait_time", lockConfig.RetryDelay*time.Duration(lockConfig.Tries)),
+	)
+
 	zap.L().Info("Connected to Redis")
 
 	return RedisDB{
 		Client:  client,
 		Redsync: rs,
 		TTLS:    ttls,
+		Lock:    lockConfig,
 	}
 }
 

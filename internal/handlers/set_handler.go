@@ -94,6 +94,7 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 			)
 			continue
 		} else {
+			// TODO : what if the redis key expires by the time we finish executing this function? extend TTL on get ?
 			// Use the cached UUID
 			item.Id = bricklinkSet.Id
 		}
