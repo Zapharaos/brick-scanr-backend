@@ -327,6 +327,10 @@ func SetRedisBrick(ctx context.Context, brick Brick, updateTTL bool) error {
 		return err
 	}
 
+	// Clean up any set related fields
+	brick.Index = 0
+	brick.Quantity = 0
+
 	// Marshal brick to JSON
 	brickJSON, err := json.Marshal(brick)
 	if err != nil {
