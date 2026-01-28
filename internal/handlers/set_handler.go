@@ -168,7 +168,6 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		return
 
 	case setruntime.CacheStatusFetching:
-		// todo: ISSUE #9 - Currency : user1 fetches for currency1, but user2 might request a different currency
 		// Data is currently being fetched, return existing websocket
 		h.handleFetchingStatus(w, r, setId, cacheResult.Set)
 		return
@@ -188,7 +187,10 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 func (h Handler) handlePriceFetch(w http.ResponseWriter, r *http.Request, setId uuid.UUID, cacheResult *setruntime.CacheCheckResult, locale, currency language.Tag) {
 	// Check if there's already a runtime for this set
 	if rs, ok := h.srh.FindRuntimeSetBySetId(setId); ok {
-		// todo: ISSUE #9 - Currency : check if the requested currency matches?
+
+		// todo: ISSUE #9 - Currency : check if the requested currency matches? [FIRST]
+		// TODO : ISSUE #8 - Async : check rs.set.FetchStatus and FetchError ? [SECOND]
+
 		// Return existing websocket
 		render.Accepted(w, r, set.DetailsResponse{
 			Completed:   false,
@@ -225,6 +227,10 @@ func (h Handler) handlePriceFetch(w http.ResponseWriter, r *http.Request, setId 
 func (h Handler) handleFetchingStatus(w http.ResponseWriter, r *http.Request, setId uuid.UUID, cachedSet set.Set) {
 	// Find the existing runtime set
 	if rs, ok := h.srh.FindRuntimeSetBySetId(setId); ok {
+
+		// todo: ISSUE #9 - Currency : check if the requested currency matches? [FIRST] -> runset for user2 ?
+		// TODO : ISSUE #8 - Async : check rs.set.FetchStatus and FetchError ? [SECOND]
+
 		render.Accepted(w, r, set.DetailsResponse{
 			Completed:   false,
 			WebsocketID: rs.ID.String(),
@@ -232,8 +238,7 @@ func (h Handler) handleFetchingStatus(w http.ResponseWriter, r *http.Request, se
 		return
 	}
 
-	// TODO : NOW investigate why this happens
-	// maybe fetching was over by the time it got here, or is it because an error occurred ?
+	// todo: ISSUE #9 - Currency : user1 fetches for currency1, but user2 might request a different currency -> runset for user2 ?
 
 	// Inconsistent state: set marked as fetching but no runtime set found
 	zap.L().Warn("Inconsistent state: set marked as fetching but no runtime set found",
@@ -249,7 +254,7 @@ func (h Handler) handleCompleteFetch(w http.ResponseWriter, r *http.Request, set
 	// Retrieve BrickLink set info from cache
 	bricklinkSet, err := setruntime.GetBricklinkSetFromCache(r.Context(), setId)
 	if err != nil {
-		render.Error(w, r, err, "Failed to retrieve BrickLink set from cache")
+		render.NotFound(w, r, err)
 		return
 	}
 

@@ -16,9 +16,6 @@ type Handler struct {
 	Upgrader    *websocket.Upgrader
 	ErrorLogger *supervisor.AsyncErrorLogger
 
-	clientChanCap  int
-	receiveChanCap int
-
 	wg    *sync.WaitGroup
 	mutex sync.RWMutex
 }
@@ -26,11 +23,9 @@ type Handler struct {
 // NewHandler creates a new handler
 func NewHandler(ctx context.Context) *Handler {
 	return &Handler{
-		sets:           make(map[uuid.UUID]*RuntimeSet),
-		mutex:          sync.RWMutex{},
-		wg:             &sync.WaitGroup{},
-		clientChanCap:  100,
-		receiveChanCap: 100,
+		sets:  make(map[uuid.UUID]*RuntimeSet),
+		mutex: sync.RWMutex{},
+		wg:    &sync.WaitGroup{},
 		Upgrader: &websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true
@@ -47,6 +42,7 @@ func (h *Handler) RunSet(set set.Set) *RuntimeSet {
 
 	// First check if the runtime set is already running
 	if rs, ok := h.FindRuntimeSetBySetId(set.Id); ok {
+		// TODO : ISSUE #8 - Async : check rs.set.FetchStatus and FetchError ?
 		return rs
 	}
 
