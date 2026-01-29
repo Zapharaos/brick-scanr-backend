@@ -27,6 +27,8 @@ func (h *Handler) FetchPricesForBricks(
 ) {
 	defer h.StopRuntimeSet(rsID)
 
+	// TODO : Update to user workerpool, but first need to review runtime status handling
+
 	zap.L().Info("Starting price fetch",
 		zap.String("runtime_id", rsID.String()),
 		zap.Int("bricks_count", len(bricks)),
@@ -61,6 +63,7 @@ func (h *Handler) FetchPricesForBricks(
 
 			// Send batch update if reached limit
 			if bprogress.HasReachedBatchLimit() && !bprogress.EmptyItems() {
+				bprogress.PrepareForSend()
 				h.PushBatchProgress(rsID, DataTypePickabrickBricks, *bprogress)
 				bprogress.CompleteBatch()
 			}
@@ -105,6 +108,7 @@ func (h *Handler) FetchPricesForBricks(
 
 		// Send batch update if reached limit
 		if bprogress.HasReachedBatchLimit() && !bprogress.EmptyItems() {
+			bprogress.PrepareForSend()
 			h.PushBatchProgress(rsID, DataTypePickabrickBricks, *bprogress)
 			bprogress.CompleteBatch()
 		}
@@ -112,6 +116,7 @@ func (h *Handler) FetchPricesForBricks(
 
 	// Send final batch if there are remaining items
 	if !bprogress.EmptyItems() {
+		bprogress.PrepareForSend()
 		h.PushBatchProgress(rsID, DataTypePickabrickBricks, *bprogress)
 		bprogress.CompleteBatch()
 	}
@@ -282,6 +287,9 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 	// Create optimal config based on item count
 	config := workerpool.NewConfigWithDefaults(itemCount)
 
+	// Create shared progress tracker
+	bprogress := NewProgress(itemCount, config.BatchSize)
+
 	zap.L().Debug("Starting worker pool for inventory processing",
 		zap.Int("item_count", itemCount),
 		zap.Int("workers", config.Workers),
@@ -309,18 +317,24 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 	}
 
 	// Batch handler: send batch to frontend and update Redis
+	// Note: This is called from a single collector goroutine, so no mutex needed
 	batchHandler := func(batch []set.Brick) error {
 		// Add bricks to set
 		cpRedisSet.Bricks = append(cpRedisSet.Bricks, batch...)
 
-		// Create progress update
-		bprogress := NewProgress(itemCount, config.BatchSize)
+		// Update shared progress with current batch
 		for _, brick := range batch {
 			bprogress.AddItem(brick)
 		}
 
+		// Prepare for sending (updates done to include current batch)
+		bprogress.PrepareForSend()
+
 		// Send batch to frontend
 		h.PushBatchProgress(rsID, DataTypeBricklinkBricks, *bprogress)
+
+		// Complete batch (resets items array for next batch)
+		bprogress.CompleteBatch()
 
 		// Update set in cache
 		if err := set.SetRedisSet(ctx, *cpRedisSet, true); err != nil {
@@ -357,26 +371,68 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 	return nil
 }
 
-// fetchPrices fetches prices for all bricks in a set from Pick-a-Brick
+// PriceJob represents a job for fetching prices for a specific design ID
+type PriceJob struct {
+	DesignID   set.DesignID
+	BrickCount int // Number of bricks with this design ID (for progress tracking)
+}
+
+// PriceJobResult represents the result of processing a price job
+type PriceJobResult struct {
+	Bricks     []set.Brick // Updated bricks with prices
+	BrickCount int         // Total bricks that were checked (for progress tracking)
+}
+
+// fetchPrices fetches prices for all bricks in a set from Pick-a-Brick using a worker pool
 func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UUID, cpRedisSet *set.Set, locale language.Tag, currency language.Tag) error {
 	bmap := set.NewBrickMap(cpRedisSet.Bricks)
 
-	// Calculate optimal batch size
-	batchSize := workerpool.CalculateOptimalBatchSize(len(bmap.BricksByDesign))
-	bprogress := NewProgress(len(bmap.BricksByDesign), batchSize)
+	designCount := len(bmap.BricksByDesign)
+	if designCount == 0 {
+		return nil
+	}
 
-	// TODO : ISSUE #1 - Search Alternate Items
-	// TODO : ISSUE #8 - Async : make inventory fetching async if possible
-	for designID := range bmap.BricksByDesign {
+	// Calculate total bricks (for progress tracking)
+	totalBricks := len(cpRedisSet.Bricks)
+
+	// Create jobs from design IDs
+	jobs := make([]PriceJob, 0, designCount)
+	for designID, bricks := range bmap.BricksByDesign {
+		jobs = append(jobs, PriceJob{
+			DesignID:   designID,
+			BrickCount: len(bricks),
+		})
+	}
+
+	// Create optimal config based on design count (workers process design IDs)
+	config := workerpool.NewConfigWithDefaults(designCount)
+
+	// Create shared progress tracker (track by total bricks, not design IDs)
+	bprogress := NewProgress(totalBricks, config.BatchSize)
+
+	zap.L().Debug("Starting worker pool for price fetching",
+		zap.Int("design_count", designCount),
+		zap.Int("total_bricks", totalBricks),
+		zap.Int("workers", config.Workers),
+		zap.Int("batch_size", config.BatchSize),
+	)
+
+	// TODO : ISSUE #1 - Search Alternate Items & make sure progress is not over tracked due to alternates
+
+	// Worker function: fetch prices for a single design ID
+	workerFunc := func(ctx context.Context, job PriceJob) (PriceJobResult, error) {
+		result := PriceJobResult{
+			Bricks:     make([]set.Brick, 0),
+			BrickCount: job.BrickCount, // Track all bricks for this design ID
+		}
+
 		// Fetch bricks by designID
-		matchingBricks, err := pickabrick.C().FetchBricksByDesignID(string(designID), locale, currency)
+		matchingBricks, err := pickabrick.C().FetchBricksByDesignID(string(job.DesignID), locale, currency)
 		if err != nil {
 			handleNonFatalError(err, "Failed to fetch bricks by designID",
-				zap.String("designID", string(designID)),
+				zap.String("designID", string(job.DesignID)),
 				zap.String("set_id", setID.String()))
-			// Continue to next design ID
-			bprogress.Increment()
-			continue
+			return result, nil // Return with BrickCount but no updated bricks
 		}
 
 		// Process matching bricks
@@ -408,7 +464,7 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 			if err = set.SetRedisBrick(ctx, brick, false); err != nil {
 				zap.L().Warn("Failed to update brick price in cache",
 					zap.Error(err),
-					zap.String("brick_design_id", string(designID)),
+					zap.String("brick_design_id", string(job.DesignID)),
 					zap.String("brick_id", string(brickID)),
 				)
 			}
@@ -416,27 +472,71 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 			// Apply currency only locally
 			brick.ApplyCurrency(currency)
 
-			// Update progress - add brick to batch
-			bprogress.AddItem(brick)
+			// Add to updated bricks list
+			result.Bricks = append(result.Bricks, brick)
 		}
 
-		// Update progress counter (even if no matching bricks found)
-		bprogress.Increment()
+		return result, nil
+	}
 
-		// Check batch progress
-		if bprogress.HasReachedBatchLimit() && !bprogress.EmptyItems() {
+	// Batch handler: send batch to frontend
+	// Note: This is called from a single collector goroutine, so no mutex needed
+	batchHandler := func(batch []PriceJobResult) error {
+		// Track progress by brick count (not job count) for better UX
+		// Each result contains bricks that were updated and the total count of bricks checked
+
+		// Increment progress by total bricks processed in this batch
+		totalBricksInBatch := 0
+		for _, result := range batch {
+			totalBricksInBatch += result.BrickCount
+		}
+
+		// Increment progress for all bricks processed
+		for i := 0; i < totalBricksInBatch; i++ {
+			bprogress.Increment()
+		}
+
+		// Add all updated bricks to items array for frontend display
+		for _, result := range batch {
+			for _, brick := range result.Bricks {
+				bprogress.Items = append(bprogress.Items, brick)
+			}
+		}
+
+		// Prepare for sending (updates done to include current batch)
+		bprogress.PrepareForSend()
+
+		// Send batch to frontend (only if we have something to report)
+		if totalBricksInBatch > 0 {
 			h.PushBatchProgress(rsID, DataTypePickabrickBricks, *bprogress)
-			bprogress.CompleteBatch()
 		}
-	}
 
-	// TODO : fix - total is way smaller than actual processed items, making progress percentage incorrect
-
-	// Send final batch if there are remaining items
-	if bprogress.BatchCurr > 0 {
-		h.PushBatchProgress(rsID, DataTypePickabrickBricks, *bprogress)
+		// Complete batch (resets items array for next batch)
 		bprogress.CompleteBatch()
+
+		return nil
 	}
+
+	// Create and run pool with batching
+	pool := workerpool.NewPool(ctx, config, workerFunc, batchHandler)
+
+	// Set error handler
+	pool.SetErrorHandler(func(err error) {
+		zap.L().Warn("Worker encountered error processing price job",
+			zap.Error(err),
+		)
+	})
+
+	// Process all price jobs
+	if err := pool.Process(jobs); err != nil {
+		handleFatalError(h, rsID, setID, set.FetchErrorBatchCache, *cpRedisSet, DataTypeSet, err,
+			"Failed to process prices with worker pool")
+		return err
+	}
+
+	zap.L().Debug("Worker pool completed price fetching",
+		zap.Int("design_count", designCount),
+	)
 
 	return nil
 }

@@ -37,11 +37,17 @@ func (p *Progress) AddItem(item any) {
 	p.Increment()
 }
 
-// CompleteBatch marks the current batch as done and resets the batch counter
-func (p *Progress) CompleteBatch() {
+// PrepareForSend updates done to include the current batch before sending to frontend
+// This ensures the frontend sees accurate progress including the current batch
+func (p *Progress) PrepareForSend() {
 	p.Done += p.BatchCurr
-	p.Items = []any{}
 	p.BatchCurr = 0
+}
+
+// CompleteBatch resets the items array after batch has been sent
+// Should be called after PrepareForSend and sending to frontend
+func (p *Progress) CompleteBatch() {
+	p.Items = []any{}
 }
 
 // GetPercentage returns the completion percentage

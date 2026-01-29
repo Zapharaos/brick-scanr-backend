@@ -180,11 +180,11 @@ func (p *Pool[TJob, TResult]) worker(workerID int) {
 				if p.errorHandler != nil {
 					p.errorHandler(err)
 				}
-				// Continue processing other jobs
-				continue
+				// Still send result (may be zero-value) to track progress
+				// Batch handler can decide whether to include it
 			}
 
-			// Send result
+			// Always send result to ensure progress tracking
 			select {
 			case <-p.ctx.Done():
 				return
@@ -211,7 +211,7 @@ func (p *Pool[TJob, TResult]) collectBatched() {
 	flushTicker := time.NewTicker(p.config.FlushInterval)
 	defer flushTicker.Stop()
 
-	for p.processedCount < p.totalJobs {
+	for {
 		select {
 		case <-p.ctx.Done():
 			p.collectorDone <- p.ctx.Err()
@@ -219,7 +219,7 @@ func (p *Pool[TJob, TResult]) collectBatched() {
 
 		case result, ok := <-p.results:
 			if !ok {
-				// Send final batch if any
+				// Channel closed - send final batch if any
 				if len(p.currentBatch) > 0 {
 					if err := p.batchHandler(p.currentBatch); err != nil {
 						p.collectorDone <- err
@@ -255,13 +255,11 @@ func (p *Pool[TJob, TResult]) collectBatched() {
 			}
 		}
 	}
-
-	p.collectorDone <- nil
 }
 
 // collectStreaming collects results and streams them individually
 func (p *Pool[TJob, TResult]) collectStreaming() {
-	for p.processedCount < p.totalJobs {
+	for {
 		select {
 		case <-p.ctx.Done():
 			p.collectorDone <- p.ctx.Err()
@@ -269,6 +267,7 @@ func (p *Pool[TJob, TResult]) collectStreaming() {
 
 		case result, ok := <-p.results:
 			if !ok {
+				// Channel closed - all results processed
 				p.collectorDone <- nil
 				return
 			}
@@ -283,8 +282,6 @@ func (p *Pool[TJob, TResult]) collectStreaming() {
 			p.processedCount++
 		}
 	}
-
-	p.collectorDone <- nil
 }
 
 // Cancel cancels the pool

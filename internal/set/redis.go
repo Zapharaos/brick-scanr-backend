@@ -35,12 +35,12 @@ func BuildLockKey(key string) string {
 func AcquireRedisLock(ctx context.Context, lockKey string) (*redsync.Mutex, error) {
 	lockConfig := database.DB().Redis().Lock
 
-	zap.L().Debug("attempting to acquire redis lock",
+	/*zap.L().Debug("attempting to acquire redis lock",
 		zap.String("lock_key", lockKey),
 		zap.Duration("expiry", lockConfig.Expiry),
 		zap.Duration("retry_delay", lockConfig.RetryDelay),
 		zap.Int("tries", lockConfig.Tries),
-	)
+	)*/
 
 	mutex := database.DB().Redis().Redsync.NewMutex(lockKey,
 		redsync.WithExpiry(lockConfig.Expiry),
@@ -69,10 +69,10 @@ func AcquireRedisLock(ctx context.Context, lockKey string) (*redsync.Mutex, erro
 		)
 	}
 
-	zap.L().Debug("successfully acquired redis lock",
+	/*zap.L().Debug("successfully acquired redis lock",
 		zap.String("lock_key", lockKey),
 		zap.Duration("wait_time", duration),
-	)
+	)*/
 
 	return mutex, nil
 }
@@ -101,9 +101,9 @@ func ReleaseRedisLock(ctx context.Context, mutex *redsync.Mutex, lockKey string)
 			zap.String("lock_key", lockKey),
 		)
 	} else {
-		zap.L().Debug("successfully released redis lock",
+		/*zap.L().Debug("successfully released redis lock",
 			zap.String("lock_key", lockKey),
-		)
+		)*/
 	}
 }
 
