@@ -39,6 +39,33 @@ func (ii *InventoryItem) HasUniqueItemID() bool {
 	return len(ii.ItemIDs) == 1
 }
 
+type CustomItemPrefixes string
+
+const (
+	CustomItemPrefixGen  CustomItemPrefixes = "gen"
+	CustomItemPrefixIdea CustomItemPrefixes = "idea"
+)
+
+func (ii *InventoryItem) IsCustom() bool {
+	// Check if ItemNo starts with any of the custom prefixes
+
+	// Check "gen" prefix (3 characters)
+	if len(ii.ItemNo) >= len(CustomItemPrefixGen) {
+		if ii.ItemNo[:len(CustomItemPrefixGen)] == string(CustomItemPrefixGen) {
+			return true
+		}
+	}
+
+	// Check "idea" prefix (4 characters)
+	if len(ii.ItemNo) >= len(CustomItemPrefixIdea) {
+		if ii.ItemNo[:len(CustomItemPrefixIdea)] == string(CustomItemPrefixIdea) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // Inventory represents the complete inventory for a set
 type Inventory struct {
 	SetNumber string          `json:"set_number"`

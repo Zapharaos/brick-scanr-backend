@@ -17,6 +17,7 @@ type BrickMinimal struct {
 	IDs      []BrickID `json:"ids"`
 	DesignID DesignID  `json:"design_id"`
 	Index    int       `json:"index"`
+	IsCustom bool      `json:"is_custom"`
 }
 
 // GetBrickIDForRedis returns the appropriate BrickID to use as a Redis key
@@ -105,6 +106,7 @@ func MapBrickFromBricklinkInventoryItem(bi bricklink.InventoryItem) Brick {
 			MainID:   mainID,
 			IDs:      ids,
 			DesignID: DesignID(bi.ItemNo),
+			IsCustom: bi.IsCustom(),
 		},
 		Name:     bi.Description,
 		ImageURL: bi.ImageURL,

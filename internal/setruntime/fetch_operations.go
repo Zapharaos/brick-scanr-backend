@@ -298,13 +298,22 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 
 	// Worker function: process a single inventory item
 	workerFunc := func(ctx context.Context, item bricklink.InventoryItem) (set.Brick, error) {
-		// Try to find in cache first
-		brick, err := set.GetRedisBrick(ctx, set.BrickID(item.ItemIDs[0]), set.DesignID(item.ItemNo))
-		if err != nil {
-			// Not found in cache, map from BrickLink item
+		skipRedis := len(item.ItemIDs) == 0
+		var brick set.Brick
+		var errW error
+
+		// Make sure we have at least one ItemID to lookup in cache
+		if !skipRedis {
+			// Try to find in cache first
+			brick, errW = set.GetRedisBrick(ctx, set.BrickID(item.ItemIDs[0]), set.DesignID(item.ItemNo))
+		}
+
+		// If no redis, map from BrickLink item
+		if skipRedis || errW != nil {
 			brick = set.MapBrickFromBricklinkInventoryItem(item)
 		}
 
+		// TODO : ok we refresh TTL here but how do we avoid instances to be indefinitely cached and risk to miss on updates
 		// Cache the brick: either for the first time, or to refresh the TTL
 		if cacheErr := set.SetRedisBrick(ctx, brick, true); cacheErr != nil {
 			zap.L().Warn("Failed to cache brick",
