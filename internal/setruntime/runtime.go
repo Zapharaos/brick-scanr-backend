@@ -27,6 +27,9 @@ type RuntimeSet struct {
 	bricks      map[string]set.Brick
 	bricksMutex sync.RWMutex
 
+	// setMutex protects concurrent access to the set field
+	setMutex sync.RWMutex
+
 	opt RuntimeOptions
 
 	errorLogger *supervisor.AsyncErrorLogger
@@ -156,6 +159,53 @@ func (rs *RuntimeSet) GetAllBricks() []set.Brick {
 	return bricks
 }
 
+// GetSet returns a shallow copy of the set for safe reading
+func (rs *RuntimeSet) GetSet() set.Set {
+	rs.setMutex.RLock()
+	defer rs.setMutex.RUnlock()
+	return rs.set
+}
+
+// GetFetchStatus returns the current fetch status
+func (rs *RuntimeSet) GetFetchStatus() set.FetchStatus {
+	rs.setMutex.RLock()
+	defer rs.setMutex.RUnlock()
+	return rs.set.FetchStatus
+}
+
+// GetFetchError returns the current fetch error
+func (rs *RuntimeSet) GetFetchError() *set.FetchError {
+	rs.setMutex.RLock()
+	defer rs.setMutex.RUnlock()
+	return rs.set.FetchError
+}
+
+// UpdateFetchStatus updates the fetch status
+func (rs *RuntimeSet) UpdateFetchStatus(status set.FetchStatus) {
+	rs.setMutex.Lock()
+	defer rs.setMutex.Unlock()
+	rs.set.FetchStatus = status
+}
+
+// SetFetchError sets the fetch error
+func (rs *RuntimeSet) SetFetchError(err *set.FetchError) {
+	rs.setMutex.Lock()
+	defer rs.setMutex.Unlock()
+	rs.set.FetchError = err
+}
+
+// UpdateBricks updates the bricks slice in rs.set.Bricks
+func (rs *RuntimeSet) UpdateBricks(bricks []set.Brick) {
+	rs.setMutex.Lock()
+	defer rs.setMutex.Unlock()
+	rs.set.Bricks = bricks
+}
+
+// GetSetID returns the set ID (immutable, no lock needed)
+func (rs *RuntimeSet) GetSetID() uuid.UUID {
+	return rs.set.Id
+}
+
 // logError logs an error message
 func (rs *RuntimeSet) logError(scope string, err error) {
 	if rs.errorLogger == nil || err == nil {
@@ -166,13 +216,13 @@ func (rs *RuntimeSet) logError(scope string, err error) {
 		Scope:    scope,
 		Message:  err.Error(),
 		Severity: string(LogSeverityError),
-		SetId:    rs.set.Id,
+		SetId:    rs.GetSetID(),
 	})
 }
 
 // stop stops the runtime set
 func (rs *RuntimeSet) stop() {
-	zap.L().Info("Set ended", zap.String("set", rs.set.Id.String()))
+	zap.L().Info("Set ended", zap.String("set", rs.GetSetID().String()))
 
 	rs.clientMutex.RLock()
 	// unregister all clients
@@ -320,11 +370,11 @@ func (rs *RuntimeSet) handleClientConnect(client Client) {
 
 	// Update rs.set.Bricks with all bricks stored in the runtime
 	// This ensures PacketInit contains all bricks fetched so far
-	rs.set.Bricks = rs.GetAllBricks()
+	rs.UpdateBricks(rs.GetAllBricks())
 
 	// Send initial packet with set info and all bricks
 	client.SendPacket(NewPacketInit(
-		rs.set,
+		rs.GetSet(),
 	))
 }
 

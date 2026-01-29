@@ -190,14 +190,20 @@ func (h Handler) handlePriceFetch(w http.ResponseWriter, r *http.Request, setId 
 	if rs, ok := h.srh.FindRuntimeSetBySetId(setId); ok {
 
 		// todo: ISSUE #9 - Currency : check if the requested currency matches? [FIRST]
-		// TODO : ISSUE #8 - Async : check rs.set.FetchStatus and FetchError ? [SECOND]
 
-		// Return existing websocket
-		render.Accepted(w, r, set.DetailsResponse{
-			Completed:   false,
-			WebsocketID: rs.ID.String(),
-		})
-		return
+		// Check if the runtime set is healthy (not failed)
+		if rs.GetFetchStatus() == set.FetchStatusFailed {
+			// Runtime set has failed - it should be cleaning itself up via its error handler
+			// Don't interfere with its cleanup, just fall through to start a new fetch
+			// The failed RS will call onRuntimeSetEnd and remove itself from the map
+		} else {
+			// Runtime set is healthy, return existing websocket
+			render.Accepted(w, r, set.DetailsResponse{
+				Completed:   false,
+				WebsocketID: rs.ID.String(),
+			})
+			return
+		}
 	}
 
 	// Create websocket runtime for price fetching
@@ -230,13 +236,20 @@ func (h Handler) handleFetchingStatus(w http.ResponseWriter, r *http.Request, se
 	if rs, ok := h.srh.FindRuntimeSetBySetId(setId); ok {
 
 		// todo: ISSUE #9 - Currency : check if the requested currency matches? [FIRST] -> runset for user2 ?
-		// TODO : ISSUE #8 - Async : check rs.set.FetchStatus and FetchError ? [SECOND]
 
-		render.Accepted(w, r, set.DetailsResponse{
-			Completed:   false,
-			WebsocketID: rs.ID.String(),
-		})
-		return
+		// Check if the runtime set is healthy (not failed)
+		if rs.GetFetchStatus() == set.FetchStatusFailed {
+			// Runtime set has failed - it should be cleaning itself up via its error handler
+			// Don't interfere with its cleanup, just fall through to start a new fetch
+			// The failed RS will call onRuntimeSetEnd and remove itself from the map
+		} else {
+			// Runtime set is healthy, return existing websocket
+			render.Accepted(w, r, set.DetailsResponse{
+				Completed:   false,
+				WebsocketID: rs.ID.String(),
+			})
+			return
+		}
 	}
 
 	// todo: ISSUE #9 - Currency : user1 fetches for currency1, but user2 might request a different currency -> runset for user2 ?

@@ -37,7 +37,7 @@ func (rs *RuntimeSet) handleDataChangeCreated(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
 		rs.refreshSet(change.Id)
-		rs.broadcastPacket(NewPacketSet(rs.set, false))
+		rs.broadcastPacket(NewPacketSet(rs.GetSet(), false))
 		break
 	default:
 		break
@@ -49,7 +49,7 @@ func (rs *RuntimeSet) handleDataChangeUpdated(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
 		rs.refreshSet(change.Id)
-		rs.broadcastPacket(NewPacketSet(rs.set, false))
+		rs.broadcastPacket(NewPacketSet(rs.GetSet(), false))
 		break
 	default:
 		break
@@ -61,7 +61,7 @@ func (rs *RuntimeSet) handleDataChangeCompleted(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
 		rs.refreshSet(change.Id)
-		rs.broadcastPacket(NewPacketSet(rs.set, false))
+		rs.broadcastPacket(NewPacketSet(rs.GetSet(), false))
 		break
 	default:
 		break
@@ -76,8 +76,9 @@ func (rs *RuntimeSet) handleDataChangeFailed(change dataChange) {
 	// Determine the fatal error code and message based on the data type
 	var fatalPacket *PacketFatal
 
-	if rs.set.FetchError != nil {
-		fatalPacket = NewPacketFatal(rs.set.FetchError.Step, rs.set.FetchError.Message)
+	fetchError := rs.GetFetchError()
+	if fetchError != nil {
+		fatalPacket = NewPacketFatal(fetchError.Step, fetchError.Message)
 	} else {
 		// Fallback if FetchError is not set for some reason
 		fatalPacket = NewPacketFatal(set.FetchErrorUnknown, "An unknown error occurred during set processing")
@@ -129,5 +130,9 @@ func (rs *RuntimeSet) refreshSet(setId uuid.UUID) {
 	if err != nil {
 		return
 	}
+
+	// Update the entire set atomically
+	rs.setMutex.Lock()
 	rs.set = cachedSet
+	rs.setMutex.Unlock()
 }

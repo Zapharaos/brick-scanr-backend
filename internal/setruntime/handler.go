@@ -36,18 +36,25 @@ func NewHandler(ctx context.Context) *Handler {
 }
 
 // RunSet runs a runtime set, if it is not already running
-func (h *Handler) RunSet(set set.Set) *RuntimeSet {
+func (h *Handler) RunSet(s set.Set) *RuntimeSet {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
 	// First check if the runtime set is already running
-	if rs, ok := h.FindRuntimeSetBySetId(set.Id); ok {
-		// TODO : ISSUE #8 - Async : check rs.set.FetchStatus and FetchError ?
-		return rs
+	if rs, ok := h.FindRuntimeSetBySetId(s.Id); ok {
+		// Check if the runtime set is healthy (not failed)
+		if rs.GetFetchStatus() == set.FetchStatusFailed {
+			// Runtime set has failed - it should be cleaning itself up via its error handler
+			// Don't interfere with its cleanup, just fall through to create a new one
+			// The failed RS will call onRuntimeSetEnd and remove itself from the map
+		} else {
+			// Runtime set is healthy, return it
+			return rs
+		}
 	}
 
 	// Create a new runtime set
-	rs := NewRuntimeSet(set, RuntimeOptionsFromConfig(), h.wg, h.ErrorLogger)
+	rs := NewRuntimeSet(s, RuntimeOptionsFromConfig(), h.wg, h.ErrorLogger)
 
 	// Set the runtime set end callback
 	rs.onEnd = h.onRuntimeSetEnd
@@ -72,7 +79,7 @@ func (h *Handler) GetRuntimeSet(id uuid.UUID) *RuntimeSet {
 // FindRuntimeSetBySetId finds a runtime set by its set ID
 func (h *Handler) FindRuntimeSetBySetId(setId uuid.UUID) (*RuntimeSet, bool) {
 	for _, rs := range h.sets {
-		if rs.set.Id == setId {
+		if rs.GetSetID() == setId {
 			return rs, true
 		}
 	}
