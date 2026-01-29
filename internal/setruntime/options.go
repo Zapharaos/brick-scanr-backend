@@ -15,7 +15,6 @@ type RuntimeOptions struct {
 	ClientTimeout          time.Duration
 	ClientTimeoutCheckFreq time.Duration
 	setChangeCheckFreq     time.Duration
-	ProgressBatchSize      int
 }
 
 // RuntimeOptionsFromConfig creates RuntimeOptions from configuration
@@ -30,7 +29,6 @@ func RuntimeOptionsFromConfig() RuntimeOptions {
 	viper.SetDefault("setruntime.client_timeout", 10*time.Minute)
 	viper.SetDefault("setruntime.client_timeout_check_freq", 30*time.Second)
 	viper.SetDefault("setruntime.set_change_check_freq", 30*time.Second)
-	viper.SetDefault("setruntime.progress_batch_size", 100)
 
 	return RuntimeOptions{
 		ClientChanCap:          viper.GetInt("setruntime.client_chan_cap"),
@@ -41,6 +39,5 @@ func RuntimeOptionsFromConfig() RuntimeOptions {
 		ClientTimeout:          viper.GetDuration("setruntime.client_timeout"),
 		ClientTimeoutCheckFreq: viper.GetDuration("setruntime.client_timeout_check_freq"),
 		setChangeCheckFreq:     viper.GetDuration("setruntime.set_change_check_freq"),
-		ProgressBatchSize:      viper.GetInt("setruntime.progress_batch_size"),
 	}
 }

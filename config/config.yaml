@@ -196,7 +196,3 @@ setruntime:
   # Expressed as a Golang duration
   # Default value: "30s"
   set_change_check_freq: "30s"
-
-  # Batch size for processing progress updates
-  # Default value: 10
-  progress_batch_size: 10

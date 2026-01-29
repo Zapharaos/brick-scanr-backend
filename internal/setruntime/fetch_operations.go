@@ -9,6 +9,7 @@ import (
 	"github.com/Zapharaos/brick-scanr-backend/internal/lego"
 	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
+	"github.com/Zapharaos/brick-scanr-backend/internal/workerpool"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"golang.org/x/text/language"
@@ -31,9 +32,9 @@ func (h *Handler) FetchPricesForBricks(
 		zap.Int("bricks_count", len(bricks)),
 	)
 
-	// Initialize progress tracker
-	rs := h.GetRuntimeSet(rsID)
-	bprogress := NewProgress(len(bricks), rs.opt.ProgressBatchSize)
+	// Calculate optimal batch size
+	batchSize := workerpool.CalculateOptimalBatchSize(len(bricks))
+	bprogress := NewProgress(len(bricks), batchSize)
 
 	// Fetch prices for each brick needing updates
 	for _, brick := range bricks {
@@ -263,7 +264,7 @@ func (h *Handler) fetchDetails(ctx context.Context, rsID uuid.UUID, setID uuid.U
 	return nil
 }
 
-// fetchInventory fetches the inventory for a set from BrickLink
+// fetchInventory fetches the inventory for a set from BrickLink using a worker pool
 func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid.UUID, cpRedisSet *set.Set) error {
 	inventory, err := bricklink.C().FetchInventory(cpRedisSet.BricklinkID, cpRedisSet.BricklinkNumber)
 	if err != nil {
@@ -273,59 +274,85 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 		return err
 	}
 
-	// TODO : ISSUE #8 - Async : make inventory fetching async if possible
+	itemCount := len(inventory.Items)
+	if itemCount == 0 {
+		return nil
+	}
 
-	// Map BrickLink inventory to internal set bricks
-	rs := h.GetRuntimeSet(rsID)
-	bprogress := NewProgress(len(inventory.Items), rs.opt.ProgressBatchSize)
-	for idx, item := range inventory.Items {
+	// Create optimal config based on item count
+	config := workerpool.NewConfigWithDefaults(itemCount)
+
+	zap.L().Debug("Starting worker pool for inventory processing",
+		zap.Int("item_count", itemCount),
+		zap.Int("workers", config.Workers),
+		zap.Int("batch_size", config.BatchSize),
+	)
+
+	// Worker function: process a single inventory item
+	workerFunc := func(ctx context.Context, item bricklink.InventoryItem) (set.Brick, error) {
 		// Try to find in cache first
-		// TODO : fatalpanic with set 21062, 21333
 		brick, err := set.GetRedisBrick(ctx, set.BrickID(item.ItemIDs[0]), set.DesignID(item.ItemNo))
 		if err != nil {
 			// Not found in cache, map from BrickLink item
 			brick = set.MapBrickFromBricklinkInventoryItem(item)
-
-			// TODO : ISSUE #1 : Alternate items - cannot have index for a brick because this is related to a set
-			// Set the index to maintain order
-			brick.Index = idx
 		}
 
-		// Cache the brick : either for the first time, or to refresh the TTL
-		if err = set.SetRedisBrick(ctx, brick, true); err != nil {
+		// Cache the brick: either for the first time, or to refresh the TTL
+		if cacheErr := set.SetRedisBrick(ctx, brick, true); cacheErr != nil {
 			zap.L().Warn("Failed to cache brick",
-				zap.Error(err),
+				zap.Error(cacheErr),
 				zap.String("brick_design_id", item.ItemNo),
 			)
 		}
 
-		// Update set copy with brick
-		cpRedisSet.Bricks = append(cpRedisSet.Bricks, brick)
-
-		// Update progress
-		bprogress.AddItem(brick)
-
-		// Check batch progress
-		if bprogress.HasReachedBatchLimit() {
-			if bprogress.EmptyItems() {
-				bprogress.CompleteBatch()
-				continue
-			}
-
-			// Send batch update via websocket
-			h.PushBatchProgress(rsID, DataTypeBricklinkBricks, *bprogress)
-			bprogress.CompleteBatch()
-
-			// Update set in cache
-			err = set.SetRedisSet(ctx, *cpRedisSet, true)
-			if err != nil {
-				// Fatal error - inventory is essential
-				handleFatalError(h, rsID, setID, set.FetchErrorBatchCache, *cpRedisSet, DataTypeSet, err,
-					"Failed to update Redis set with inventory batch")
-				return err
-			}
-		}
+		return brick, nil
 	}
+
+	// Batch handler: send batch to frontend and update Redis
+	batchHandler := func(batch []set.Brick) error {
+		// Add bricks to set
+		cpRedisSet.Bricks = append(cpRedisSet.Bricks, batch...)
+
+		// Create progress update
+		bprogress := NewProgress(itemCount, config.BatchSize)
+		for _, brick := range batch {
+			bprogress.AddItem(brick)
+		}
+
+		// Send batch to frontend
+		h.PushBatchProgress(rsID, DataTypeBricklinkBricks, *bprogress)
+
+		// Update set in cache
+		if err := set.SetRedisSet(ctx, *cpRedisSet, true); err != nil {
+			handleFatalError(h, rsID, setID, set.FetchErrorBatchCache, *cpRedisSet, DataTypeSet, err,
+				"Failed to update Redis set with inventory batch")
+			return err
+		}
+
+		return nil
+	}
+
+	// Create and run pool with batching
+	pool := workerpool.NewPool(ctx, config, workerFunc, batchHandler)
+
+	// Set error handler
+	pool.SetErrorHandler(func(err error) {
+		zap.L().Warn("Worker encountered error processing brick",
+			zap.Error(err),
+		)
+	})
+
+	// Process all inventory items
+	if err := pool.Process(inventory.Items); err != nil {
+		handleFatalError(h, rsID, setID, set.FetchErrorBatchCache, *cpRedisSet, DataTypeSet, err,
+			"Failed to process inventory with worker pool")
+		return err
+	}
+
+	zap.L().Debug("Worker pool completed inventory processing",
+		zap.Int("item_count", itemCount),
+		zap.Int("bricks_processed", len(cpRedisSet.Bricks)),
+	)
 
 	return nil
 }
@@ -333,8 +360,10 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 // fetchPrices fetches prices for all bricks in a set from Pick-a-Brick
 func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UUID, cpRedisSet *set.Set, locale language.Tag, currency language.Tag) error {
 	bmap := set.NewBrickMap(cpRedisSet.Bricks)
-	rs := h.GetRuntimeSet(rsID)
-	bprogress := NewProgress(len(bmap.BricksByDesign), rs.opt.ProgressBatchSize)
+
+	// Calculate optimal batch size
+	batchSize := workerpool.CalculateOptimalBatchSize(len(bmap.BricksByDesign))
+	bprogress := NewProgress(len(bmap.BricksByDesign), batchSize)
 
 	// TODO : ISSUE #1 - Search Alternate Items
 	// TODO : ISSUE #8 - Async : make inventory fetching async if possible
