@@ -25,7 +25,11 @@ func (h *Handler) FetchPricesForBricks(
 	locale language.Tag,
 	currency language.Tag,
 ) {
-	defer h.StopRuntimeSet(rs.Key())
+	defer func() {
+		// Give clients time to receive the message before cleanup
+		time.Sleep(3 * time.Second)
+		h.StopRuntimeSet(rs.Key())
+	}()
 
 	// TODO : NOW - Update to user workerpool, but first need to review runtime status handling
 
@@ -283,19 +287,19 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 		return err
 	}
 
-	itemCount := len(inventory.Items)
-	if itemCount == 0 {
+	inventorySize := len(inventory.RegularItems)
+	if inventorySize == 0 {
 		return nil
 	}
 
 	// Create optimal config based on item count
-	config := workerpool.NewConfigWithDefaults(itemCount)
+	config := workerpool.NewConfigWithDefaults(inventorySize)
 
 	// Create shared progress tracker
-	bprogress := NewProgress(itemCount, config.BatchSize)
+	bprogress := NewProgress(inventorySize, config.BatchSize)
 
 	zap.L().Debug("Starting worker pool for inventory processing",
-		zap.Int("item_count", itemCount),
+		zap.Int("item_count", inventorySize),
 		zap.Int("workers", config.Workers),
 		zap.Int("batch_size", config.BatchSize),
 	)
@@ -370,14 +374,14 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 	})
 
 	// Process all inventory items
-	if err := pool.Process(inventory.Items); err != nil {
+	if err := pool.Process(inventory.RegularItems); err != nil {
 		handleFatalError(h, rsID, setID, set.FetchErrorBatchCache, *cpRedisSet, DataTypeSet, err,
 			"Failed to process inventory with worker pool")
 		return err
 	}
 
 	zap.L().Debug("Worker pool completed inventory processing",
-		zap.Int("item_count", itemCount),
+		zap.Int("item_count", inventorySize),
 		zap.Int("bricks_processed", len(cpRedisSet.Bricks)),
 	)
 

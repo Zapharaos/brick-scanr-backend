@@ -143,8 +143,6 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		zap.String("remote_addr", r.RemoteAddr),
 	)
 
-	// TODO : NOW debug how many rs there are
-
 	// Check cached set data
 	cacheResult, err := h.srh.CheckCachedSet(r.Context(), setId, currency)
 	if err != nil || cacheResult == nil {
@@ -211,7 +209,6 @@ func (h Handler) handleMissingPrices(w http.ResponseWriter, r *http.Request, set
 	rs := h.srh.RunSet(cacheResult.Set, currency, setruntime.OpTypePrices)
 
 	// Add all bricks to the runtime in their original order
-	// todo : NOW ISSUE #9 - Currency : fix because bfull has 193 items but rs ends up with only 162
 	rs.AddBricks(cacheResult.Bricks)
 
 	// Start goroutine to fetch missing prices
@@ -230,34 +227,6 @@ func (h Handler) handleMissingPrices(w http.ResponseWriter, r *http.Request, set
 		WebsocketID: rs.ID.String(),
 	})
 }
-
-/*// handleOngoingFetch handles the case where data is currently being fetched
-func (h Handler) handleOngoingFetch(w http.ResponseWriter, r *http.Request, setId uuid.UUID) {
-	// The cache already verified there's a runtime set with the matching currency
-	// Find the healthy runtime set for this set ID with the requested currency
-	currency := GetCurrencyFromContext(r)
-	sets := h.srh.FindRuntimeSetBySetId(setId)
-
-	for _, rs := range sets {
-		if rs.Key().Currency == currency && rs.GetFetchStatus() != set.FetchStatusFailed {
-			// Found a healthy runtime set with matching currency
-			render.Accepted(w, r, set.DetailsResponse{
-				Completed:   false,
-				WebsocketID: rs.ID.String(),
-			})
-			return
-		}
-	}
-
-	// Inconsistent state: set marked as fetching but no matching runtime set found
-	zap.L().Warn("Inconsistent state: set marked as fetching but no matching runtime set found",
-		zap.String("set_id", setId.String()),
-		zap.String("currency", currency.String()),
-	)
-
-	// Fall back to starting a new fetch
-	h.handleCompleteFetch(w, r, setId, GetLocaleFromContext(r), currency)
-}*/
 
 // handleCompleteFetch handles the case where we need to perform a complete fetch
 func (h Handler) handleCompleteFetch(w http.ResponseWriter, r *http.Request, setId uuid.UUID, locale, currency language.Tag) {

@@ -150,6 +150,8 @@ func (rs *RuntimeSet) AddBricks(bricks []set.Brick) {
 	rs.bricksMutex.Lock()
 	defer rs.bricksMutex.Unlock()
 
+	dup := make(map[string]set.Brick)
+
 	count := 0
 	for _, brick := range bricks {
 		// Create unique key from BrickID and DesignID
@@ -158,12 +160,13 @@ func (rs *RuntimeSet) AddBricks(bricks []set.Brick) {
 			zap.L().Warn("Failed to get brick ID for runtime storage", zap.Error(err))
 			continue
 		}
-		key := string(brickID) + ":" + string(brick.DesignID)
+		key := string(brick.DesignID) + ":" + string(brickID)
 
 		_, exists := rs.bricks[key]
 		if exists {
 			// Update existing brick if needed (e.g., quantity, price)
 			rs.bricks[key] = brick
+			dup[key] = brick
 			count++
 		} else {
 			// Add or update the brick

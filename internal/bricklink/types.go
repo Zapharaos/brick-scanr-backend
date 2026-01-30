@@ -68,9 +68,12 @@ func (ii *InventoryItem) IsCustom() bool {
 
 // Inventory represents the complete inventory for a set
 type Inventory struct {
-	SetNumber string          `json:"set_number"`
-	Items     []InventoryItem `json:"items"`
-	FetchedAt time.Time       `json:"fetched_at"`
+	SetNumber        string          `json:"set_number"`
+	RegularItems     []InventoryItem `json:"regular_items"`
+	ExtraItems       []InventoryItem `json:"extra_items"`
+	AlternateItems   []InventoryItem `json:"alternate_items"`
+	CounterpartItems []InventoryItem `json:"counterpart_items"`
+	FetchedAt        time.Time       `json:"fetched_at"`
 }
 
 type searchTypeList struct {

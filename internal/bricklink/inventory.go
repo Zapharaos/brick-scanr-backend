@@ -89,18 +89,46 @@ func (c *Client) parseInventory(htmlContent, setNumber string) (*Inventory, erro
 	}
 
 	inventory := &Inventory{
-		SetNumber: setNumber,
-		Items:     []InventoryItem{},
-		FetchedAt: time.Now(),
+		SetNumber:        setNumber,
+		RegularItems:     []InventoryItem{},
+		ExtraItems:       []InventoryItem{},
+		AlternateItems:   []InventoryItem{},
+		CounterpartItems: []InventoryItem{},
+		FetchedAt:        time.Now(),
 	}
+
+	// Track current category based on headers
+	currentCategory := "regular" // default category
 
 	var findRows func(*html.Node)
 	findRows = func(n *html.Node) {
 		if n.Type == html.ElementNode && n.Data == "tr" {
-			if hasClass(n, "pciinvItemRow") {
+			// Check for category headers
+			if hasClass(n, "pciinvExtraHeader") {
+				headerText := strings.ToLower(strings.TrimSpace(getTextContent(n)))
+				if strings.Contains(headerText, "regular items") {
+					currentCategory = "regular"
+				} else if strings.Contains(headerText, "extra items") {
+					currentCategory = "extra"
+				} else if strings.Contains(headerText, "alternate items") {
+					currentCategory = "alternate"
+				} else if strings.Contains(headerText, "counterparts") {
+					currentCategory = "counterpart"
+				}
+			} else if hasClass(n, "pciinvItemRow") {
+				// Parse item and add to appropriate category
 				item := c.parseItemRow(n)
 				if item.ItemNo != "" {
-					inventory.Items = append(inventory.Items, item)
+					switch currentCategory {
+					case "regular":
+						inventory.RegularItems = append(inventory.RegularItems, item)
+					case "extra":
+						inventory.ExtraItems = append(inventory.ExtraItems, item)
+					case "alternate":
+						inventory.AlternateItems = append(inventory.AlternateItems, item)
+					case "counterpart":
+						inventory.CounterpartItems = append(inventory.CounterpartItems, item)
+					}
 				}
 			}
 		}
@@ -111,9 +139,16 @@ func (c *Client) parseInventory(htmlContent, setNumber string) (*Inventory, erro
 
 	findRows(doc)
 
+	totalItems := len(inventory.RegularItems) + len(inventory.ExtraItems) +
+		len(inventory.AlternateItems) + len(inventory.CounterpartItems)
+
 	zap.L().Info("Parsed BrickLink inventory",
 		zap.String("set_number", setNumber),
-		zap.Int("item_count", len(inventory.Items)))
+		zap.Int("regular_items", len(inventory.RegularItems)),
+		zap.Int("extra_items", len(inventory.ExtraItems)),
+		zap.Int("alternate_items", len(inventory.AlternateItems)),
+		zap.Int("counterpart_items", len(inventory.CounterpartItems)),
+		zap.Int("total_items", totalItems))
 	return inventory, nil
 }
 
