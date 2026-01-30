@@ -97,7 +97,7 @@ func (h *Handler) FetchPricesForBricks(
 				}
 
 				// Apply currency
-				brick.ApplyCurrency(currency)
+				brick.MustApplyCurrency(currency)
 				priceUpdated = true
 				break
 			}
@@ -105,7 +105,7 @@ func (h *Handler) FetchPricesForBricks(
 
 		if !priceUpdated {
 			// Brick not found in API response - might be discontinued
-			brick.ApplyCurrency(currency)
+			brick.MustApplyCurrency(currency)
 		}
 
 		// Update progress
@@ -149,8 +149,6 @@ func (h *Handler) FetchCompleteSetDetails(
 		time.Sleep(3 * time.Second)
 		h.StopRuntimeSet(rs.Key())
 	}()
-
-	// TODO check for valid cached data, if existing then care for missing prices / missing currencies / outdated currency prices
 
 	zap.L().Info("Starting complete set details fetch",
 		zap.String("runtime_id", rs.ID.String()),
@@ -263,7 +261,7 @@ func (h *Handler) fetchDetails(ctx context.Context, rsID uuid.UUID, setID uuid.U
 			cpRedisSet.Prices = make(map[language.Tag]*set.Price)
 		}
 		cpRedisSet.Prices[currency] = &lp
-		cpRedisSet.ApplyCurrency(currency)
+		cpRedisSet.MustApplyCurrency(currency)
 
 		err = set.SetRedisSet(ctx, *cpRedisSet, true)
 		if err != nil {
@@ -391,6 +389,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 // PriceJob represents a job for fetching prices for a specific design ID
 type PriceJob struct {
 	DesignID   set.DesignID
+	Bricks     []set.Brick
 	BrickCount int // Number of Bricks with this design ID (for progress tracking)
 }
 
@@ -417,6 +416,7 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 	for designID, bricks := range bmap.BricksByDesign {
 		jobs = append(jobs, PriceJob{
 			DesignID:   designID,
+			Bricks:     bricks,
 			BrickCount: len(bricks),
 		})
 	}
@@ -435,12 +435,18 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 	)
 
 	// TODO : ISSUE #1 - Search Alternate Items & make sure progress is not over tracked due to alternates
+	// TODO: ISSUE #1 - Alternate items - alternate items add bricks to initial inventory, 85 instead of 70
 
 	// Worker function: fetch prices for a single design ID
 	workerFunc := func(ctx context.Context, job PriceJob) (PriceJobResult, error) {
 		result := PriceJobResult{
 			Bricks:     make([]set.Brick, 0),
 			BrickCount: job.BrickCount, // Track all Bricks for this design ID
+		}
+
+		// No bricks to process for this design ID
+		if len(job.Bricks) == 0 {
+			return result, nil
 		}
 
 		// Fetch Bricks by designID
@@ -477,6 +483,12 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 			}
 			brick.Prices[currency] = &pbp
 
+			// Temporarily hide index and quantity, redis brick instance can be shared across sets
+			qty := brick.Quantity
+			idx := brick.BrickMinimal.Index
+			brick.Quantity = 0
+			brick.BrickMinimal.Index = 0
+
 			// Update brick in cache
 			if err = set.SetRedisBrick(ctx, brick, false); err != nil {
 				zap.L().Warn("Failed to update brick price in cache",
@@ -487,7 +499,11 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 			}
 
 			// Apply currency only locally
-			brick.ApplyCurrency(currency)
+			brick.MustApplyCurrency(currency)
+
+			// Restore index and quantity
+			brick.Quantity = qty
+			brick.BrickMinimal.Index = idx
 
 			// Add to updated Bricks list
 			result.Bricks = append(result.Bricks, brick)

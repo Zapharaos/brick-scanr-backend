@@ -125,11 +125,8 @@ func checkSetInRedis(ctx context.Context, setID uuid.UUID, currency language.Tag
 	case set.FetchStatusCompleted:
 		return checkSetDataValidity(ctx, cachedSet, setID, currency)
 	default:
-		/* TODO : NOW - rs create before redis create ?
-			if so then case set.FetchStatusPending, set.FetchStatusFetching: are considered incomplete data
-		    else use FetchStatusFetchingInventory FetchStatusFetchingPrices to help decide ?
-		*/
-		// Previous fetch failed or is incomplete, needs refetch
+		// A previous fetch might have failed, or the redis instance became an orphan without a runtime set link
+		// Therefore the redis set instance will be considered incomplete and as needing refetch
 		zap.L().Warn("Previous set details fetch failed or incomplete",
 			zap.String("set_id", setID.String()),
 		)
@@ -150,9 +147,7 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 		setPriceOutdated = true
 	} else {
 		// Apply the price to the set
-		if !cachedSet.ApplyCurrency(currency) {
-			setPriceOutdated = true
-		}
+		cachedSet.MustApplyCurrency(currency)
 	}
 
 	// Prepare slices to hold full Brick data and those missing prices
@@ -187,7 +182,6 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 			}, nil
 		}
 
-		// TODO : handle quantity and index properly
 		// Set the index to maintain order
 		if brickMin.Index >= 0 {
 			brick.Index = brickMin.Index
@@ -195,15 +189,14 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 			brick.Index = idx
 		}
 
-		// Brick price for requested currency is outdated
+		brick.Quantity = brickMin.Quantity
+
+		// Brick price for requested currency is not available, outdated
 		if p, ok := brick.Prices.GetPrice(currency); !ok || p.IsOutdated(database.DB().Redis().TTLS.BrickPrice) {
 			bricksWoPrices = append(bricksWoPrices, brick)
-		}
-
-		// Price is valid and up-to-date, apply it
-		if !brick.ApplyCurrency(currency) {
-			// Price for this currency not cached - should not happen since we checked above
-			bricksWoPrices = append(bricksWoPrices, brick)
+		} else {
+			// Price is valid and up-to-date, apply it
+			brick.MustApplyCurrency(currency)
 		}
 
 		bricks = append(bricks, brick)

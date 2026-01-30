@@ -26,6 +26,7 @@ type SearchItem struct {
 
 // InventoryItem represents a single item from the BrickLink inventory
 type InventoryItem struct {
+	Index       int      `json:"index"`
 	ItemIDs     []string `json:"item_ids"`
 	ItemNo      string   `json:"item_no"`
 	Quantity    string   `json:"quantity"`

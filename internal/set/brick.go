@@ -56,21 +56,19 @@ type Brick struct {
 	Prices   PricePerCurrencies
 }
 
-// ApplyCurrency sets the Brick's Price and MainID based on the given locale tag
-func (b *Brick) ApplyCurrency(tag language.Tag) bool {
+// MustApplyCurrency sets the Brick's Price and MainID based on the given locale tag if possible, otherwise does nothing
+func (b *Brick) MustApplyCurrency(tag language.Tag) {
 	price, ok := b.Prices.GetPrice(tag)
 	if !ok {
-		return false
+		return
 	}
 	b.Price = *price
 	brickID := BrickID(price.ItemID)
 	b.MainID = &brickID
-	return true
 }
 
 // MapBrickFromBricklinkInventoryItem maps a Bricklink InventoryItem to an internal Brick representation
 func MapBrickFromBricklinkInventoryItem(bi bricklink.InventoryItem) Brick {
-	// Map to internal brick representation
 	qty := 0
 	if bi.Quantity != "" {
 		if q, err := strconv.Atoi(bi.Quantity); err == nil {
@@ -96,6 +94,7 @@ func MapBrickFromBricklinkInventoryItem(bi bricklink.InventoryItem) Brick {
 			MainID:   mainID,
 			IDs:      ids,
 			DesignID: DesignID(bi.ItemNo),
+			Index:    bi.Index,
 			IsCustom: bi.IsCustom(),
 		},
 		Name:     bi.Description,

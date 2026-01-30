@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
+	"github.com/Zapharaos/brick-scanr-backend/internal/utils"
 	"github.com/google/uuid"
 )
 
@@ -61,7 +62,8 @@ func (rs *RuntimeSet) handleDataChangeCompleted(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
 		rs.refreshSet(change.Id)
-		rs.broadcastPacket(NewPacketSet(rs.GetSet(), false))
+		rs.set.Bricks = utils.MapValues(rs.bricks)
+		rs.broadcastPacket(NewPacketSet(rs.GetSet(), true))
 		break
 	default:
 		break
@@ -124,8 +126,6 @@ func (rs *RuntimeSet) handleDataChangeProgress(change dataChange) {
 
 // refreshSet refreshes the set data from Redis
 func (rs *RuntimeSet) refreshSet(setId uuid.UUID) {
-	// todo : NOW - ISSUE #9 - Currency : can't have a same rs with different currencies or
-	// make sure that the cachedSet data has the right currency applied every time
 	cachedSet, err := set.GetRedisSet(context.Background(), setId)
 	if err != nil {
 		return

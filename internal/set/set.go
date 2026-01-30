@@ -103,14 +103,13 @@ func MapLegoProductStatus(p lego.Product) Status {
 	return StatusRetired
 }
 
-// ApplyCurrency sets the Set's Price based on the given locale tag
-func (s *Set) ApplyCurrency(tag language.Tag) bool {
+// MustApplyCurrency sets the Set's Price based on the given locale tag if possible, otherwise does nothing
+func (s *Set) MustApplyCurrency(tag language.Tag) {
 	price, ok := s.Prices.GetPrice(tag)
 	if !ok {
-		return false
+		return
 	}
 	s.Price = *price
-	return true
 }
 
 // DetailsResponse represents the response for a set details request

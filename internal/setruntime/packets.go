@@ -198,7 +198,7 @@ func (p *PacketSet) ToJSON() ([]byte, error) {
 // PacketInventoryBatch is a packet to send a batch of Bricks
 type PacketInventoryBatch struct {
 	packet
-	Bricks         []set.Brick `json:"Bricks"`
+	Bricks         []set.Brick `json:"bricks"`
 	BricksProgress *Progress   `json:"bricksProgress"`
 	Status         BatchStatus `json:"status"`
 }

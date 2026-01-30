@@ -169,6 +169,7 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		return
 
 	case setruntime.CacheStatusMissesPrices:
+		// TODO : when fetching price but fails or not found, maybe mark the price as fetched but with smaller TTL ?
 		// Data is cached but needs price updates for requested currency
 		h.handleMissingPrices(w, r, setId, cacheResult, locale, currency)
 		return

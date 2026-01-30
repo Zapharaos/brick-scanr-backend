@@ -99,6 +99,7 @@ func (c *Client) parseInventory(htmlContent, setNumber string) (*Inventory, erro
 
 	// Track current category based on headers
 	currentCategory := "regular" // default category
+	itemIndex := 0               // global item index across all categories
 
 	var findRows func(*html.Node)
 	findRows = func(n *html.Node) {
@@ -119,6 +120,10 @@ func (c *Client) parseInventory(htmlContent, setNumber string) (*Inventory, erro
 				// Parse item and add to appropriate category
 				item := c.parseItemRow(n)
 				if item.ItemNo != "" {
+					// Assign index to the item
+					item.Index = itemIndex
+					itemIndex++
+
 					switch currentCategory {
 					case "regular":
 						inventory.RegularItems = append(inventory.RegularItems, item)
