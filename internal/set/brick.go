@@ -53,23 +53,13 @@ type Brick struct {
 	ColorHex string `json:"color_hex"`
 	Quantity int    `json:"quantity"`
 	Price    Price  `json:"price"`
-	Prices   map[language.Tag]*Price
-}
-
-// GetPriceForLocale returns the price for the given locale tag, or nil if not found
-func (b *Brick) GetPriceForLocale(tag language.Tag) *Price {
-	if b.Prices != nil {
-		if price, exists := b.Prices[tag]; exists {
-			return price
-		}
-	}
-	return nil
+	Prices   PricePerCurrencies
 }
 
 // ApplyCurrency sets the Brick's Price and MainID based on the given locale tag
 func (b *Brick) ApplyCurrency(tag language.Tag) bool {
-	price := b.GetPriceForLocale(tag)
-	if price == nil {
+	price, ok := b.Prices.GetPrice(tag)
+	if !ok {
 		return false
 	}
 	b.Price = *price

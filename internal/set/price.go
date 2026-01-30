@@ -5,7 +5,20 @@ import (
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/lego"
 	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
+	"golang.org/x/text/language"
 )
+
+type PricePerCurrencies map[language.Tag]*Price
+
+func (ppc PricePerCurrencies) HasCurrency(tag language.Tag) bool {
+	_, exists := ppc[tag]
+	return exists
+}
+
+func (ppc PricePerCurrencies) GetPrice(tag language.Tag) (*Price, bool) {
+	price, exists := ppc[tag]
+	return price, exists
+}
 
 type Price struct {
 	CentAmount int    `json:"cent_amount"`

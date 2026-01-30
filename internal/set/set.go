@@ -55,7 +55,7 @@ type Set struct {
 	YearReleased    int         `json:"year_released"`
 	Status          Status      `json:"status"`
 	Price           Price       `json:"price"`
-	Prices          map[language.Tag]*Price
+	Prices          PricePerCurrencies
 	InstructionsURL string  `json:"instructions_url"`
 	Parts           int     `json:"parts"`
 	Bricks          []Brick `json:"bricks"`
@@ -103,20 +103,10 @@ func MapLegoProductStatus(p lego.Product) Status {
 	return StatusRetired
 }
 
-// GetPriceForLocale returns the price for the given locale tag, or nil if not found
-func (s *Set) GetPriceForLocale(tag language.Tag) *Price {
-	if s.Prices != nil {
-		if price, exists := s.Prices[tag]; exists {
-			return price
-		}
-	}
-	return nil
-}
-
 // ApplyCurrency sets the Set's Price based on the given locale tag
 func (s *Set) ApplyCurrency(tag language.Tag) bool {
-	price := s.GetPriceForLocale(tag)
-	if price == nil {
+	price, ok := s.Prices.GetPrice(tag)
+	if !ok {
 		return false
 	}
 	s.Price = *price

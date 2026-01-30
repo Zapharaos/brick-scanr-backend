@@ -9,10 +9,13 @@ import (
 	"github.com/Zapharaos/brick-scanr-backend/internal/supervisor"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"go.uber.org/zap"
+	"golang.org/x/text/language"
 )
 
 type Handler struct {
-	sets        map[uuid.UUID]*RuntimeSet
+	sets        map[uuid.UUID]*RuntimeSet // Direct lookup by RS ID
+	setsByKey   map[string]*RuntimeSet    // Lookup by operation key
 	Upgrader    *websocket.Upgrader
 	ErrorLogger *supervisor.AsyncErrorLogger
 
@@ -23,9 +26,10 @@ type Handler struct {
 // NewHandler creates a new handler
 func NewHandler(ctx context.Context) *Handler {
 	return &Handler{
-		sets:  make(map[uuid.UUID]*RuntimeSet),
-		mutex: sync.RWMutex{},
-		wg:    &sync.WaitGroup{},
+		sets:      make(map[uuid.UUID]*RuntimeSet),
+		setsByKey: make(map[string]*RuntimeSet),
+		mutex:     sync.RWMutex{},
+		wg:        &sync.WaitGroup{},
 		Upgrader: &websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true
@@ -36,25 +40,33 @@ func NewHandler(ctx context.Context) *Handler {
 }
 
 // RunSet runs a runtime set, if it is not already running
-func (h *Handler) RunSet(s set.Set) *RuntimeSet {
+func (h *Handler) RunSet(s set.Set, currency language.Tag, opType OperationType) *RuntimeSet {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
-	// First check if the runtime set is already running
-	if rs, ok := h.FindRuntimeSetBySetId(s.Id); ok {
+	key := NewRuntimeSetKey(s.Id, currency, opType)
+	keyStr := key.String()
+
+	// Check if a runtime set with this exact key already exists
+	if rs, ok := h.setsByKey[keyStr]; ok {
 		// Check if the runtime set is healthy (not failed)
 		if rs.GetFetchStatus() == set.FetchStatusFailed {
-			// Runtime set has failed - it should be cleaning itself up via its error handler
-			// Don't interfere with its cleanup, just fall through to create a new one
-			// The failed RS will call onRuntimeSetEnd and remove itself from the map
+			// Runtime set has failed, force stop it and create a new one
+			zap.L().Info("Stopping failed runtime set to create new one",
+				zap.String("key", keyStr),
+			)
+			h.forceStopRuntimeSetLocked(rs)
 		} else {
-			// Runtime set is healthy, return it
+			// Runtime set is healthy and matches our key, return it
+			zap.L().Info("Reusing existing healthy runtime set",
+				zap.String("key", keyStr),
+			)
 			return rs
 		}
 	}
 
 	// Create a new runtime set
-	rs := NewRuntimeSet(s, RuntimeOptionsFromConfig(), h.wg, h.ErrorLogger)
+	rs := NewRuntimeSet(s, key, RuntimeOptionsFromConfig(), h.wg, h.ErrorLogger)
 
 	// Set the runtime set end callback
 	rs.onEnd = h.onRuntimeSetEnd
@@ -64,6 +76,12 @@ func (h *Handler) RunSet(s set.Set) *RuntimeSet {
 
 	// Add the runtime set to the handler
 	h.sets[rs.ID] = rs
+	h.setsByKey[keyStr] = rs
+
+	zap.L().Info("Started new runtime set",
+		zap.String("runtime_id", rs.ID.String()),
+		zap.String("key", keyStr),
+	)
 
 	return rs
 }
@@ -76,22 +94,44 @@ func (h *Handler) GetRuntimeSet(id uuid.UUID) *RuntimeSet {
 	return h.sets[id]
 }
 
-// FindRuntimeSetBySetId finds a runtime set by its set ID
-func (h *Handler) FindRuntimeSetBySetId(setId uuid.UUID) (*RuntimeSet, bool) {
+// FindRuntimeSetByKey finds a runtime set by its key
+func (h *Handler) FindRuntimeSetByKey(key RuntimeSetKey) (*RuntimeSet, bool) {
+	h.mutex.RLock()
+	defer h.mutex.RUnlock()
+
+	rs, ok := h.setsByKey[key.String()]
+	return rs, ok
+}
+
+// FindRuntimeSetBySetId finds all runtime sets for a given set ID
+// Multiple runtime sets can exist for the same set ID with different currencies/operations
+func (h *Handler) FindRuntimeSetBySetId(setId uuid.UUID) []*RuntimeSet {
+	h.mutex.RLock()
+	defer h.mutex.RUnlock()
+
+	sets := make([]*RuntimeSet, 0)
 	for _, rs := range h.sets {
 		if rs.GetSetID() == setId {
-			return rs, true
+			sets = append(sets, rs)
 		}
 	}
-	return nil, false
+	return sets
 }
 
 // RemoveRuntimeSet removes a runtime set from the handler
-func (h *Handler) RemoveRuntimeSet(id uuid.UUID) {
+func (h *Handler) RemoveRuntimeSet(key RuntimeSetKey) {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
-	delete(h.sets, id)
+	keyStr := key.String()
+	if rs, ok := h.setsByKey[keyStr]; ok {
+		delete(h.sets, rs.ID)
+		delete(h.setsByKey, keyStr)
+		zap.L().Info("Removed runtime set",
+			zap.String("runtime_id", rs.ID.String()),
+			zap.String("key", keyStr),
+		)
+	}
 }
 
 // PushChange pushes a change to the runtime set, if it exists
@@ -119,22 +159,41 @@ func (h *Handler) PushBatchProgress(rsId uuid.UUID, dType DataType, progress Pro
 }
 
 // StopRuntimeSet stops a specific running runtime set cleanly
-func (h *Handler) StopRuntimeSet(id uuid.UUID) bool {
+func (h *Handler) StopRuntimeSet(key RuntimeSetKey) bool {
 	h.mutex.RLock()
-	defer h.mutex.RUnlock()
-	s, exists := h.sets[id]
+	rs, exists := h.setsByKey[key.String()]
+	h.mutex.RUnlock()
 
 	if !exists {
 		return false
 	}
 
 	select {
-	case s.done <- struct{}{}:
+	case rs.done <- struct{}{}:
 		return true
 	default:
 		// Channel is full or closed, runtime set might already be stopping
 		return false
 	}
+}
+
+// forceStopRuntimeSetLocked forcefully stops a runtime set (must be called with mutex locked)
+func (h *Handler) forceStopRuntimeSetLocked(rs *RuntimeSet) {
+	// Remove from maps immediately
+	delete(h.sets, rs.ID)
+	delete(h.setsByKey, rs.Key().String())
+
+	// Try to signal the runtime to stop
+	select {
+	case rs.done <- struct{}{}:
+	default:
+		// Channel is full or closed, runtime set might already be stopping
+	}
+
+	zap.L().Info("Forcefully stopped runtime set",
+		zap.String("runtime_id", rs.ID.String()),
+		zap.String("key", rs.Key().String()),
+	)
 }
 
 // Shutdown shuts down the handler
@@ -159,6 +218,6 @@ func (h *Handler) IsSetRunning(id uuid.UUID) bool {
 }
 
 // onRuntimeSetEnd is called when a runtime set ends
-func (h *Handler) onRuntimeSetEnd(id uuid.UUID) {
-	h.RemoveRuntimeSet(id)
+func (h *Handler) onRuntimeSetEnd(key RuntimeSetKey) {
+	h.RemoveRuntimeSet(key)
 }

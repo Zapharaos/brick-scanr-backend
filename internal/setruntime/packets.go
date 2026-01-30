@@ -195,10 +195,10 @@ func (p *PacketSet) ToJSON() ([]byte, error) {
 	return json.Marshal(p)
 }
 
-// PacketInventoryBatch is a packet to send a batch of bricks
+// PacketInventoryBatch is a packet to send a batch of Bricks
 type PacketInventoryBatch struct {
 	packet
-	Bricks         []set.Brick `json:"bricks"`
+	Bricks         []set.Brick `json:"Bricks"`
 	BricksProgress *Progress   `json:"bricksProgress"`
 	Status         BatchStatus `json:"status"`
 }

@@ -143,9 +143,11 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		zap.String("remote_addr", r.RemoteAddr),
 	)
 
+	// TODO : NOW debug how many rs there are
+
 	// Check cached set data
-	cacheResult, err := setruntime.CheckCachedSetData(r.Context(), setId, currency)
-	if err != nil {
+	cacheResult, err := h.srh.CheckCachedSet(r.Context(), setId, currency)
+	if err != nil || cacheResult == nil {
 		render.Error(w, r, err, "Failed to check cached set data")
 		return
 	}
@@ -153,8 +155,6 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 	// Handle based on cache status
 	switch cacheResult.Status {
 	case setruntime.CacheStatusComplete:
-		// TODO : update the lego set price if outdated
-		// TODO : update the pickabrick brick prices if outdated
 		// Data is fully cached and ready to return
 		render.Accepted(w, r, set.DetailsResponse{
 			Completed: true,
@@ -162,15 +162,17 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 
-	case setruntime.CacheStatusNeedsPrices:
-		// TODO : update the lego set price if outdated
-		// Data is cached but needs price updates for requested currency
-		h.handlePriceFetch(w, r, setId, cacheResult, locale, currency)
-		return
-
 	case setruntime.CacheStatusFetching:
 		// Data is currently being fetched, return existing websocket
-		h.handleFetchingStatus(w, r, setId, cacheResult.Set)
+		render.Accepted(w, r, set.DetailsResponse{
+			Completed:   false,
+			WebsocketID: cacheResult.RsID.String(),
+		})
+		return
+
+	case setruntime.CacheStatusMissesPrices:
+		// Data is cached but needs price updates for requested currency
+		h.handleMissingPrices(w, r, setId, cacheResult, locale, currency)
 		return
 
 	case setruntime.CacheStatusFailed, setruntime.CacheStatusNeedsRefetch, setruntime.CacheStatusMissing:
@@ -184,20 +186,19 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handlePriceFetch handles the case where we need to fetch prices for a different currency
-func (h Handler) handlePriceFetch(w http.ResponseWriter, r *http.Request, setId uuid.UUID, cacheResult *setruntime.CacheCheckResult, locale, currency language.Tag) {
-	// Check if there's already a runtime for this set
-	if rs, ok := h.srh.FindRuntimeSetBySetId(setId); ok {
+// handleMissingPrices handles the case where we need to fetch missing prices
+func (h Handler) handleMissingPrices(w http.ResponseWriter, r *http.Request, setId uuid.UUID, cacheResult *setruntime.CacheCheckResult, locale, currency language.Tag) {
+	// Create the key for this operation
+	key := setruntime.NewRuntimeSetKey(setId, currency, setruntime.OpTypePrices)
 
-		// todo: ISSUE #9 - Currency : check if the requested currency matches? [FIRST]
-
+	// Check if there's already a runtime for this exact operation
+	if rs, ok := h.srh.FindRuntimeSetByKey(key); ok {
 		// Check if the runtime set is healthy (not failed)
 		if rs.GetFetchStatus() == set.FetchStatusFailed {
-			// Runtime set has failed - it should be cleaning itself up via its error handler
-			// Don't interfere with its cleanup, just fall through to start a new fetch
-			// The failed RS will call onRuntimeSetEnd and remove itself from the map
+			// Runtime set has failed - it will be forcefully stopped and replaced
+			// Fall through to create a new one
 		} else {
-			// Runtime set is healthy, return existing websocket
+			// Runtime set is healthy and matches our needs, return existing websocket
 			render.Accepted(w, r, set.DetailsResponse{
 				Completed:   false,
 				WebsocketID: rs.ID.String(),
@@ -207,18 +208,18 @@ func (h Handler) handlePriceFetch(w http.ResponseWriter, r *http.Request, setId 
 	}
 
 	// Create websocket runtime for price fetching
-	rs := h.srh.RunSet(cacheResult.Set)
+	rs := h.srh.RunSet(cacheResult.Set, currency, setruntime.OpTypePrices)
 
 	// Add all bricks to the runtime in their original order
-	// todo : ISSUE #9 - Currency : fix because bfull has 193 items but rs ends up with only 162
-	rs.AddBricks(cacheResult.FullBricks)
+	// todo : NOW ISSUE #9 - Currency : fix because bfull has 193 items but rs ends up with only 162
+	rs.AddBricks(cacheResult.Bricks)
 
 	// Start goroutine to fetch missing prices
 	go h.srh.FetchPricesForBricks(
 		context.Background(),
-		rs.ID,
+		rs,
 		setId,
-		cacheResult.BricksNeedingPrices,
+		cacheResult.BricksWoPrices,
 		locale,
 		currency,
 	)
@@ -230,20 +231,16 @@ func (h Handler) handlePriceFetch(w http.ResponseWriter, r *http.Request, setId 
 	})
 }
 
-// handleFetchingStatus handles the case where data is currently being fetched
-func (h Handler) handleFetchingStatus(w http.ResponseWriter, r *http.Request, setId uuid.UUID, cachedSet set.Set) {
-	// Find the existing runtime set
-	if rs, ok := h.srh.FindRuntimeSetBySetId(setId); ok {
+/*// handleOngoingFetch handles the case where data is currently being fetched
+func (h Handler) handleOngoingFetch(w http.ResponseWriter, r *http.Request, setId uuid.UUID) {
+	// The cache already verified there's a runtime set with the matching currency
+	// Find the healthy runtime set for this set ID with the requested currency
+	currency := GetCurrencyFromContext(r)
+	sets := h.srh.FindRuntimeSetBySetId(setId)
 
-		// todo: ISSUE #9 - Currency : check if the requested currency matches? [FIRST] -> runset for user2 ?
-
-		// Check if the runtime set is healthy (not failed)
-		if rs.GetFetchStatus() == set.FetchStatusFailed {
-			// Runtime set has failed - it should be cleaning itself up via its error handler
-			// Don't interfere with its cleanup, just fall through to start a new fetch
-			// The failed RS will call onRuntimeSetEnd and remove itself from the map
-		} else {
-			// Runtime set is healthy, return existing websocket
+	for _, rs := range sets {
+		if rs.Key().Currency == currency && rs.GetFetchStatus() != set.FetchStatusFailed {
+			// Found a healthy runtime set with matching currency
 			render.Accepted(w, r, set.DetailsResponse{
 				Completed:   false,
 				WebsocketID: rs.ID.String(),
@@ -252,33 +249,33 @@ func (h Handler) handleFetchingStatus(w http.ResponseWriter, r *http.Request, se
 		}
 	}
 
-	// todo: ISSUE #9 - Currency : user1 fetches for currency1, but user2 might request a different currency -> runset for user2 ?
-
-	// Inconsistent state: set marked as fetching but no runtime set found
-	zap.L().Warn("Inconsistent state: set marked as fetching but no runtime set found",
+	// Inconsistent state: set marked as fetching but no matching runtime set found
+	zap.L().Warn("Inconsistent state: set marked as fetching but no matching runtime set found",
 		zap.String("set_id", setId.String()),
+		zap.String("currency", currency.String()),
 	)
 
 	// Fall back to starting a new fetch
-	h.handleCompleteFetch(w, r, setId, GetLocaleFromContext(r), GetCurrencyFromContext(r))
-}
+	h.handleCompleteFetch(w, r, setId, GetLocaleFromContext(r), currency)
+}*/
 
 // handleCompleteFetch handles the case where we need to perform a complete fetch
 func (h Handler) handleCompleteFetch(w http.ResponseWriter, r *http.Request, setId uuid.UUID, locale, currency language.Tag) {
 	// Retrieve BrickLink set info from cache
 	bricklinkSet, err := setruntime.GetBricklinkSetFromCache(r.Context(), setId)
 	if err != nil {
+		// TTL most likely expired - cannot proceed
 		render.NotFound(w, r, err)
 		return
 	}
 
 	// Create websocket
-	rs := h.srh.RunSet(bricklinkSet)
+	rs := h.srh.RunSet(bricklinkSet, currency, setruntime.OpTypeFull)
 
 	// Start processing in background
 	go h.srh.FetchCompleteSetDetails(
 		context.Background(),
-		rs.ID,
+		rs,
 		setId,
 		bricklinkSet,
 		locale,

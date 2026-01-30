@@ -3,6 +3,7 @@ package setruntime
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -11,39 +12,68 @@ import (
 	"github.com/Zapharaos/brick-scanr-backend/internal/supervisor"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+	"golang.org/x/text/language"
 )
 
+type OperationType string
+
+const (
+	OpTypeFull   OperationType = "full"
+	OpTypePrices OperationType = "prices"
+)
+
+// RuntimeSetKey uniquely identifies a runtime set operation
+type RuntimeSetKey struct {
+	SetID    uuid.UUID
+	Currency language.Tag
+	OpType   OperationType // "full" or "prices"
+}
+
+func NewRuntimeSetKey(setID uuid.UUID, currency language.Tag, opType OperationType) RuntimeSetKey {
+	return RuntimeSetKey{
+		SetID:    setID,
+		Currency: currency,
+		OpType:   opType,
+	}
+}
+
+func (k RuntimeSetKey) String() string {
+	return fmt.Sprintf("%s_%s_%s", k.SetID, k.Currency, k.OpType)
+}
+
 type RuntimeSet struct {
-	ID  uuid.UUID
-	set set.Set
+	ID  uuid.UUID     // Unique ID for this runtime set (used for websocket connections)
+	key RuntimeSetKey // Key identifying the operation (SetID + Currency + OpType)
+	opt RuntimeOptions
+
+	// setMutex protects concurrent access to the set field
+	setMutex sync.RWMutex
+	set      set.Set
+
+	// bricks stores all bricks processed during this runtime (by BrickID+DesignID)
+	// This allows new clients to receive all bricks when joining an ongoing fetch
+	bricksMutex sync.RWMutex
+	bricks      map[string]set.Brick
+
 	*clientHolder
 	receive    chan clientMessage
 	register   chan Client
 	unregister chan uuid.UUID
 	changeChan chan dataChange
 
-	// bricks stores all bricks processed during this runtime (by BrickID+DesignID)
-	// This allows new clients to receive all bricks when joining an ongoing fetch
-	bricks      map[string]set.Brick
-	bricksMutex sync.RWMutex
-
-	// setMutex protects concurrent access to the set field
-	setMutex sync.RWMutex
-
-	opt RuntimeOptions
-
-	errorLogger *supervisor.AsyncErrorLogger
-
 	done  chan struct{}
-	onEnd func(uuid.UUID)
+	onEnd func(key RuntimeSetKey)
 
 	wg *sync.WaitGroup
+
+	errorLogger *supervisor.AsyncErrorLogger
 }
 
 // NewRuntimeSet creates a new runtime set
-func NewRuntimeSet(s set.Set, opt RuntimeOptions, wg *sync.WaitGroup, errorLogger *supervisor.AsyncErrorLogger) *RuntimeSet {
+func NewRuntimeSet(s set.Set, key RuntimeSetKey, opt RuntimeOptions, wg *sync.WaitGroup, errorLogger *supervisor.AsyncErrorLogger) *RuntimeSet {
 	rs := &RuntimeSet{
 		ID:           uuid.New(),
+		key:          key,
 		set:          s,
 		errorLogger:  errorLogger,
 		opt:          opt,
@@ -59,6 +89,10 @@ func NewRuntimeSet(s set.Set, opt RuntimeOptions, wg *sync.WaitGroup, errorLogge
 	}
 
 	return rs
+}
+
+func (rs *RuntimeSet) Key() RuntimeSetKey {
+	return rs.key
 }
 
 // Start starts the runtime set
@@ -111,7 +145,7 @@ func (rs *RuntimeSet) AddBrick(brick set.Brick) {
 	rs.bricks[key] = brick
 }
 
-// AddBricks adds or updates multiple bricks in the runtime set
+// AddBricks adds or updates multiple Bricks in the runtime set
 func (rs *RuntimeSet) AddBricks(bricks []set.Brick) {
 	rs.bricksMutex.Lock()
 	defer rs.bricksMutex.Unlock()
@@ -137,11 +171,11 @@ func (rs *RuntimeSet) AddBricks(bricks []set.Brick) {
 		}
 	}
 
-	debuug := count
-	debuug++
+	debug := count
+	debug++
 }
 
-// GetAllBricks returns all bricks currently stored in the runtime, sorted by index
+// GetAllBricks returns all Bricks currently stored in the runtime, sorted by index
 func (rs *RuntimeSet) GetAllBricks() []set.Brick {
 	rs.bricksMutex.RLock()
 	defer rs.bricksMutex.RUnlock()
@@ -151,7 +185,7 @@ func (rs *RuntimeSet) GetAllBricks() []set.Brick {
 		bricks = append(bricks, brick)
 	}
 
-	// Sort bricks by index to maintain original order from the set
+	// Sort Bricks by index to maintain original order from the set
 	sort.Slice(bricks, func(i, j int) bool {
 		return bricks[i].Index < bricks[j].Index
 	})
@@ -194,7 +228,7 @@ func (rs *RuntimeSet) SetFetchError(err *set.FetchError) {
 	rs.set.FetchError = err
 }
 
-// UpdateBricks updates the bricks slice in rs.set.Bricks
+// UpdateBricks updates the Bricks slice in rs.set.Bricks
 func (rs *RuntimeSet) UpdateBricks(bricks []set.Brick) {
 	rs.setMutex.Lock()
 	defer rs.setMutex.Unlock()
@@ -231,7 +265,7 @@ func (rs *RuntimeSet) stop() {
 	}
 	rs.clientMutex.RUnlock()
 
-	rs.onEnd(rs.ID)
+	rs.onEnd(rs.Key())
 }
 
 // run starts the runtime set
@@ -368,11 +402,11 @@ func (rs *RuntimeSet) clientFatal(id uuid.UUID, err error) {
 func (rs *RuntimeSet) handleClientConnect(client Client) {
 	rs.registerClient(client)
 
-	// Update rs.set.Bricks with all bricks stored in the runtime
-	// This ensures PacketInit contains all bricks fetched so far
+	// Update rs.set.Bricks with all Bricks stored in the runtime
+	// This ensures PacketInit contains all Bricks fetched so far
 	rs.UpdateBricks(rs.GetAllBricks())
 
-	// Send initial packet with set info and all bricks
+	// Send initial packet with set info and all Bricks
 	client.SendPacket(NewPacketInit(
 		rs.GetSet(),
 	))

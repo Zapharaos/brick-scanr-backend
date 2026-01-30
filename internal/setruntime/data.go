@@ -101,7 +101,7 @@ func (rs *RuntimeSet) handleDataChangeProgress(change dataChange) {
 			}
 		}
 
-		// Store bricks in RuntimeSet for new clients joining later
+		// Store Bricks in RuntimeSet for new clients joining later
 		rs.AddBricks(bricks)
 
 		// Determine the batch status
@@ -124,7 +124,7 @@ func (rs *RuntimeSet) handleDataChangeProgress(change dataChange) {
 
 // refreshSet refreshes the set data from Redis
 func (rs *RuntimeSet) refreshSet(setId uuid.UUID) {
-	// todo : ISSUE #9 - Currency : can't have a same rs with different currencies or
+	// todo : NOW - ISSUE #9 - Currency : can't have a same rs with different currencies or
 	// make sure that the cachedSet data has the right currency applied every time
 	cachedSet, err := set.GetRedisSet(context.Background(), setId)
 	if err != nil {
