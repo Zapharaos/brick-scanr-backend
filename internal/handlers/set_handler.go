@@ -169,7 +169,7 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		return
 
 	case setruntime.CacheStatusMissesPrices:
-		// TODO : when fetching price but fails or not found, maybe mark the price as fetched but with smaller TTL ?
+		// TODO : NOW when fetching price but fails or not found, maybe mark the price as fetched but with smaller TTL ?
 		// Data is cached but needs price updates for requested currency
 		h.handleMissingPrices(w, r, setId, cacheResult, locale, currency)
 		return
@@ -213,11 +213,11 @@ func (h Handler) handleMissingPrices(w http.ResponseWriter, r *http.Request, set
 	rs.AddBricks(cacheResult.Bricks)
 
 	// Start goroutine to fetch missing prices
-	go h.srh.FetchPricesForBricks(
+	go h.srh.FetchMissingPrices(
 		context.Background(),
 		rs,
 		setId,
-		cacheResult.BricksWoPrices,
+		cacheResult,
 		locale,
 		currency,
 	)

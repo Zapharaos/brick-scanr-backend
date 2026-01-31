@@ -13,7 +13,7 @@ import (
 )
 
 // FetchProductDetails fetches product details from LEGO's official API using the product slug
-func (c *Client) FetchProductDetails(slug string, locale language.Tag, currency language.Tag) (*Product, error) {
+func (c *Client) FetchProductDetails(slug string, currency language.Tag) (*Product, error) {
 	// If mock mode is enabled, load from mock file
 	if c.useMocks {
 		zap.L().Info("Using mock data for LEGO product details", zap.String("slug", slug))
@@ -49,7 +49,7 @@ func (c *Client) FetchProductDetails(slug string, locale language.Tag, currency 
 
 	// Prepare extensions with locale and persisted query
 	extensions := map[string]interface{}{
-		"locale": locale.String(),
+		"locale": currency.String(),
 		"persistedQuery": map[string]interface{}{
 			"version":    1,
 			"sha256Hash": "27f8e800bed4b4e47c81ab976436c641b50e3683a41412d9496e90ae79dd19da",
@@ -75,18 +75,17 @@ func (c *Client) FetchProductDetails(slug string, locale language.Tag, currency 
 
 	// Set required headers
 	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Language", locale.String()+",en;q=0.9")
+	req.Header.Set("Accept-Language", currency.String()+",en;q=0.9")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-locale", currency.String())
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36")
-	req.Header.Set("Referer", fmt.Sprintf("https://www.lego.com/%s/product/%s", locale.String(), slug))
+	req.Header.Set("Referer", fmt.Sprintf("https://www.lego.com/%s/product/%s", currency.String(), slug))
 	req.Header.Set("sec-fetch-dest", "empty")
 	req.Header.Set("sec-fetch-mode", "same-origin")
 	req.Header.Set("sec-fetch-site", "same-origin")
 
 	zap.L().Info("Fetching LEGO product details",
 		zap.String("slug", slug),
-		zap.String("locale", locale.String()),
 		zap.String("currency", currency.String()))
 
 	// Execute the request

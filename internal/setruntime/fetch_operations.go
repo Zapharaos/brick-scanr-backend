@@ -15,13 +15,25 @@ import (
 	"golang.org/x/text/language"
 )
 
-// FetchPricesForBricks fetches prices for Bricks that are missing them for the requested currency
+// BrickPriceJob represents a job for fetching a price for a specific brick
+type BrickPriceJob struct {
+	Brick set.Brick
+	Index int // Original index for ordering
+}
+
+// BrickPriceJobResult represents the result of processing a brick price job
+type BrickPriceJobResult struct {
+	Brick set.Brick
+	Index int // Original index for ordering
+}
+
+// FetchMissingPrices fetches prices for Bricks that are missing them for the requested currency
 // This is used when we have cached brick data but need prices for a different currency
-func (h *Handler) FetchPricesForBricks(
+func (h *Handler) FetchMissingPrices(
 	ctx context.Context,
 	rs *RuntimeSet,
 	setID uuid.UUID,
-	bricks []set.Brick,
+	cacheResult *CacheCheckResult,
 	locale language.Tag,
 	currency language.Tag,
 ) {
@@ -31,26 +43,64 @@ func (h *Handler) FetchPricesForBricks(
 		h.StopRuntimeSet(rs.Key())
 	}()
 
-	// TODO : NOW - Update to user workerpool, but first need to review runtime status handling
-
 	zap.L().Info("Starting price fetch",
 		zap.String("runtime_id", rs.ID.String()),
 		zap.String("key", rs.Key().String()),
-		zap.Int("bricks_count", len(bricks)),
+		zap.Int("bricks_count", len(cacheResult.BricksWoPrices)),
 	)
 
-	// Calculate optimal batch size
-	batchSize := workerpool.CalculateOptimalBatchSize(len(bricks))
-	bprogress := NewProgress(len(bricks), batchSize)
+	// Check if set price is outdated
+	if cacheResult.SetPriceOutdated {
+		ok, err := h.fetchLegoProductDetails(ctx, rs.ID, setID, &cacheResult.Set, locale, currency, true)
+		if err == nil && ok {
+			h.PushChange(rs.ID, setID, DataTypeSet, DataTypeUpdated)
+		}
+	}
 
-	// Fetch prices for each brick needing updates
-	for _, brick := range bricks {
+	bricksCount := len(cacheResult.BricksWoPrices)
+	if bricksCount == 0 {
+		h.PushChange(rs.ID, setID, DataTypeSet, DataTypeCompleted)
+		return
+	}
+
+	// Create jobs from bricks
+	jobs := make([]BrickPriceJob, 0, bricksCount)
+	for i, brick := range cacheResult.BricksWoPrices {
+		jobs = append(jobs, BrickPriceJob{
+			Brick: brick,
+			Index: i,
+		})
+	}
+
+	// Create optimal config based on brick count
+	config := workerpool.NewConfigWithDefaults(bricksCount)
+
+	// Create shared progress tracker
+	bprogress := NewProgress(bricksCount, config.BatchSize)
+
+	zap.L().Debug("Starting worker pool for brick price fetching",
+		zap.Int("bricks_count", bricksCount),
+		zap.Int("workers", config.Workers),
+		zap.Int("batch_size", config.BatchSize),
+	)
+
+	// Worker function: fetch price for a single brick
+	workerFunc := func(ctx context.Context, job BrickPriceJob) (BrickPriceJobResult, error) {
+		brick := job.Brick
+		result := BrickPriceJobResult{
+			Brick: brick,
+			Index: job.Index,
+		}
+
 		brickID, err := brick.GetBrickIDForRedis()
 		if err != nil {
 			zap.L().Warn("Failed to get brick ID for redis",
 				zap.Error(err),
 			)
-			continue
+			// Apply currency and return brick without price update
+			brick.MustApplyCurrency(currency)
+			result.Brick = brick
+			return result, nil
 		}
 
 		// Fetch brick with price for the requested currency
@@ -63,16 +113,10 @@ func (h *Handler) FetchPricesForBricks(
 				zap.String("design_id", string(brick.DesignID)),
 				zap.String("currency", currency.String()),
 			)
-			// Add brick without new price to progress
-			bprogress.AddItem(brick)
-
-			// Send batch update if reached limit
-			if bprogress.HasReachedBatchLimit() && !bprogress.EmptyItems() {
-				bprogress.PrepareForSend()
-				h.PushBatchProgress(rs.ID, DataTypePickabrickBricks, *bprogress)
-				bprogress.CompleteBatch()
-			}
-			continue
+			// Apply currency and return brick without price update
+			brick.MustApplyCurrency(currency)
+			result.Brick = brick
+			return result, nil
 		}
 
 		// Find matching brick and update price
@@ -108,22 +152,48 @@ func (h *Handler) FetchPricesForBricks(
 			brick.MustApplyCurrency(currency)
 		}
 
-		// Update progress
-		bprogress.AddItem(brick)
-
-		// Send batch update if reached limit
-		if bprogress.HasReachedBatchLimit() && !bprogress.EmptyItems() {
-			bprogress.PrepareForSend()
-			h.PushBatchProgress(rs.ID, DataTypePickabrickBricks, *bprogress)
-			bprogress.CompleteBatch()
-		}
+		result.Brick = brick
+		return result, nil
 	}
 
-	// Send final batch if there are remaining items
-	if !bprogress.EmptyItems() {
+	// Batch handler: send batch to frontend
+	// Note: This is called from a single collector goroutine, so no mutex needed
+	batchHandler := func(batch []BrickPriceJobResult) error {
+		// Add all updated bricks to progress
+		for _, result := range batch {
+			bprogress.AddItem(result.Brick)
+		}
+
+		// Prepare for sending
 		bprogress.PrepareForSend()
+
+		// Send batch to frontend
 		h.PushBatchProgress(rs.ID, DataTypePickabrickBricks, *bprogress)
+
+		// Complete batch (resets items array for next batch)
 		bprogress.CompleteBatch()
+
+		return nil
+	}
+
+	// Create and run pool with batching
+	pool := workerpool.NewPool(ctx, config, workerFunc, batchHandler)
+
+	// Set error handler
+	pool.SetErrorHandler(func(err error) {
+		zap.L().Warn("Worker encountered error processing brick price",
+			zap.Error(err),
+		)
+	})
+
+	// Process all brick price jobs
+	if err := pool.Process(jobs); err != nil {
+		zap.L().Error("Failed to process brick prices with worker pool",
+			zap.Error(err),
+			zap.String("runtime_id", rs.ID.String()),
+		)
+		h.PushChange(rs.ID, setID, DataTypeSet, DataTypeFailed)
+		return
 	}
 
 	// Mark as completed
@@ -238,8 +308,18 @@ func (h *Handler) fetchDetails(ctx context.Context, rsID uuid.UUID, setID uuid.U
 	}
 	h.PushChange(rsID, setID, DataTypeSet, DataTypeUpdated)
 
+	ok, err := h.fetchLegoProductDetails(ctx, rsID, setID, cpRedisSet, locale, currency, false)
+	if err == nil && ok {
+		h.PushChange(rsID, setID, DataTypeSet, DataTypeUpdated)
+	}
+
+	return nil
+}
+
+// fetchLegoProductDetails fetches product details from LEGO and updates the set
+func (h *Handler) fetchLegoProductDetails(ctx context.Context, rsID uuid.UUID, setID uuid.UUID, cpRedisSet *set.Set, locale language.Tag, currency language.Tag, priceOnly bool) (bool, error) {
 	// Fetch product details from LEGO
-	legoProduct, err := lego.C().FetchProductDetails(cpRedisSet.Number, locale, currency)
+	legoProduct, err := lego.C().FetchProductDetails(cpRedisSet.Number, currency)
 	if err != nil {
 		// Non-fatal: LEGO data is supplementary, log warning and continue
 		// This can happen for older or discontinued sets not present in LEGO's API, or for specific locales etc.
@@ -249,10 +329,13 @@ func (h *Handler) fetchDetails(ctx context.Context, rsID uuid.UUID, setID uuid.U
 			zap.String("set_id", setID.String()),
 		)
 	} else {
-		cpRedisSet.Slug = legoProduct.Slug
-		cpRedisSet.BuildLegoURL(locale)
-		cpRedisSet.BuildInstructionsURL(locale)
-		cpRedisSet.Status = set.MapLegoProductStatus(*legoProduct)
+
+		if !priceOnly {
+			cpRedisSet.Slug = legoProduct.Slug
+			cpRedisSet.BuildLegoURL(locale)
+			cpRedisSet.BuildInstructionsURL(locale)
+			cpRedisSet.Status = set.MapLegoProductStatus(*legoProduct)
+		}
 
 		// Update set with fetched price
 		lp := set.MapPriceFromLego(legoProduct.Variant.Price)
@@ -267,12 +350,12 @@ func (h *Handler) fetchDetails(ctx context.Context, rsID uuid.UUID, setID uuid.U
 		if err != nil {
 			handleFatalError(h, rsID, setID, set.FetchErrorDetailsCache, *cpRedisSet, DataTypeSet, err,
 				"Failed to update Redis set inventory")
-			return err
+			return false, err
 		}
-		h.PushChange(rsID, setID, DataTypeSet, DataTypeUpdated)
-	}
 
-	return nil
+		return true, nil
+	}
+	return false, nil
 }
 
 // fetchInventory fetches the inventory for a set from BrickLink using a worker pool
