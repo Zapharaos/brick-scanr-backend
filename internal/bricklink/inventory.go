@@ -174,7 +174,7 @@ func (c *Client) parseItemRow(row *html.Node) InventoryItem {
 		case 3:
 			item.ItemNo = extractItemNo(td)
 		case 4:
-			item.Description, item.Color, item.ItemIDs = extractDescription(td)
+			item.Description, item.ItemIDs = extractDescription(td)
 		}
 		colIndex++
 	}
@@ -221,20 +221,15 @@ func extractItemNo(td *html.Node) string {
 	return findLink(td)
 }
 
-func extractDescription(td *html.Node) (string, string, []string) {
-	var description, color string
+func extractDescription(td *html.Node) (string, []string) {
+	var description string
 	var itemIDs []string
 
 	var traverse func(*html.Node)
 	traverse = func(n *html.Node) {
 		if n.Type == html.ElementNode {
 			if n.Data == "b" {
-				fullDesc := strings.TrimSpace(getTextContent(n))
-				description = fullDesc
-				parts := strings.SplitN(fullDesc, " ", 2)
-				if len(parts) > 1 {
-					color = parts[0]
-				}
+				description = strings.TrimSpace(getTextContent(n))
 			} else if n.Data == "span" && hasClass(n, "pciinvPartsColorCode") {
 				itemIDstr := strings.TrimSpace(getTextContent(n))
 				itemIDs = parseItemIDs(itemIDstr)
@@ -246,7 +241,7 @@ func extractDescription(td *html.Node) (string, string, []string) {
 	}
 
 	traverse(td)
-	return description, color, itemIDs
+	return description, itemIDs
 }
 
 // parseItemIDs extracts item IDs from a string like "X or Y or Z"

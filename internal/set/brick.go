@@ -4,8 +4,10 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
+	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
 	"golang.org/x/text/language"
 )
 
@@ -43,18 +45,66 @@ func (bm *BrickMinimal) GetBrickIDForRedis() (BrickID, error) {
 	return keyID, nil
 }
 
+type Color struct {
+	Name        string `json:"name"`
+	Key         string `json:"key"`
+	Hex         string `json:"hex"`
+	ContrastHex string `json:"contrast_hex"`
+	FamilyName  string `json:"family_name"`
+	FamilyKey   string `json:"family_key"`
+}
+
+func MapColorFromPickabrick(pab pickabrick.Brick) Color {
+	color := Color{
+		Hex:         pab.ColorHex,
+		ContrastHex: pab.ContrastColorHex,
+	}
+
+	if pab.Facets != nil {
+		if pab.Facets.Color != nil {
+			color.Name = pab.Facets.Color.Name
+			color.Key = pab.Facets.Color.Key
+		}
+		if pab.Facets.ColorFamily != nil {
+			color.FamilyName = pab.Facets.ColorFamily.Name
+			color.FamilyKey = pab.Facets.ColorFamily.Key
+		}
+	}
+
+	return color
+}
+
+func MapColorFromBricklink(colorName string) Color {
+	return Color{
+		Name: colorName,
+	}
+}
+
 // TODO : ISSUE #1 : Alternate items - cannot have index + quantity for a brick because this is related to a set
 
 type Brick struct {
 	BrickMinimal
-	Name       string `json:"name"`
-	ImageURL   string `json:"image_url"`
-	Color      string `json:"color"`
-	ColorHex   string `json:"color_hex"`
-	Quantity   int    `json:"quantity"`
-	Price      Price  `json:"price"`
-	Prices     PricePerCurrencies
-	TotalPrice Price `json:"total_price"`
+	Status        Status `json:"status"`
+	Name          string `json:"name"`
+	ImageURL      string `json:"image_url"`
+	PickabrickURL string `json:"pickabrick_url"`
+	Color         Color  `json:"color"`
+	Quantity      int    `json:"quantity"`
+	Price         Price  `json:"price"`
+	Prices        PricePerCurrencies
+	TotalPrice    Price `json:"total_price"`
+}
+
+func (b *Brick) BuildPickabrickURL(locale language.Tag) {
+	var id string
+	if b.MainID != nil {
+		id = string(*b.MainID)
+	} else if len(b.IDs) > 0 {
+		id = string(b.IDs[0])
+	} else {
+		id = string(b.DesignID)
+	}
+	b.PickabrickURL = "https://www.lego.com/" + locale.String() + "/pick-and-build/pick-a-brick?selectedElement=" + id
 }
 
 // MustApplyCurrency sets the Brick's Price and MainID based on the given locale tag if possible, otherwise does nothing
@@ -100,7 +150,27 @@ func MapBrickFromBricklinkInventoryItem(bi bricklink.InventoryItem) Brick {
 		},
 		Name:     bi.Description,
 		ImageURL: bi.ImageURL,
-		Color:    bi.Color,
 		Quantity: qty,
 	}
+}
+
+func MapBrickFromPickabrick(brick Brick, brickID BrickID, pab pickabrick.Brick, locale, currency language.Tag) Brick {
+	// Prepare fetched price
+	pbp := MapPriceFromPickabrick(pab.Price)
+	pbp.ItemID = string(brickID)
+	pbp.FetchedAt = time.Now().UnixMilli()
+
+	// Update brick with fetched price
+	if brick.Prices == nil {
+		brick.Prices = make(map[language.Tag]*Price)
+	}
+	brick.Prices[currency] = &pbp
+
+	// Update additional fields from Pick-a-Brick
+	brick.BuildPickabrickURL(locale)
+	brick.Status = MapPickabrickStatus(pab.Availability)
+	brick.Color = MapColorFromPickabrick(pab)
+	brick.Name = pab.Name
+
+	return brick
 }

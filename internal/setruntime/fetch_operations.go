@@ -557,14 +557,8 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 				continue
 			}
 
-			// Update brick with fetched price
-			pbp := set.MapPriceFromPickabrick(mb.Price)
-			pbp.ItemID = string(brickID)
-			pbp.FetchedAt = time.Now().UnixMilli()
-			if brick.Prices == nil {
-				brick.Prices = make(map[language.Tag]*set.Price)
-			}
-			brick.Prices[currency] = &pbp
+			// Update brick with fetched data from pickabrick
+			brick = set.MapBrickFromPickabrick(brick, brickID, mb, locale, currency)
 
 			// Temporarily hide index and quantity, redis brick instance can be shared across sets
 			qty := brick.Quantity

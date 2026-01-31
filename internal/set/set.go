@@ -2,7 +2,6 @@ package set
 
 import (
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
-	"github.com/Zapharaos/brick-scanr-backend/internal/lego"
 	"github.com/google/uuid"
 	"golang.org/x/text/language"
 )
@@ -33,15 +32,6 @@ type FetchError struct {
 	Message string         `json:"message"`
 	Step    FetchErrorStep `json:"step"`
 }
-
-type Status int
-
-const (
-	StatusRetired Status = iota
-	StatusOutOfStock
-	StatusBackorder
-	StatusAvailable
-)
 
 type Set struct {
 	FetchStatus     FetchStatus `json:"fetch_status"`
@@ -88,21 +78,6 @@ func MapSetFromBricklinkSearch(bs bricklink.SearchItem) (Set, error) {
 		BricklinkID:     bs.IDItem,
 		BricklinkNumber: bs.StrItemNo,
 	}, nil
-}
-
-func MapLegoProductStatus(p lego.Product) Status {
-	switch p.Variant.Attributes.AvailabilityStatus {
-	case lego.EAvailable:
-		return StatusAvailable
-	case lego.HOutOfStock:
-		return StatusOutOfStock
-	case lego.FBackorderForDate:
-		return StatusBackorder
-	case lego.RRetired:
-	default:
-		break
-	}
-	return StatusRetired
 }
 
 // MustApplyCurrency sets the Set's Price based on the given locale tag if possible, otherwise does nothing

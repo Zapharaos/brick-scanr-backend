@@ -31,7 +31,6 @@ type InventoryItem struct {
 	ItemNo      string   `json:"item_no"`
 	Quantity    string   `json:"quantity"`
 	Description string   `json:"description"`
-	Color       string   `json:"color"`
 	ImageURL    string   `json:"image_url"`
 }
 

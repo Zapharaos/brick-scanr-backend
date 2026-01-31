@@ -35,6 +35,8 @@ func (c *Client) FetchProductDetails(slug string, currency language.Tag) (*Produ
 		return &response.Data.Product, nil
 	}
 
+	// TODO : fix : review x-locale vs accept-language vs referer + front URL with those
+
 	// Build the GraphQL request URL
 	baseURL := "https://www.lego.com/api/graphql/ProductDetails"
 

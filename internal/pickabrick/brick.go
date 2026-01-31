@@ -12,6 +12,13 @@ import (
 	"golang.org/x/text/language"
 )
 
+type AvailabilityStatus int
+
+const (
+	OutOfStock = "OUT_OF_STOCK"
+	Available  = "AVAILABLE"
+)
+
 type Price struct {
 	CentAmount      int     `json:"centAmount"`
 	CurrencyCode    string  `json:"currencyCode"`
@@ -19,17 +26,31 @@ type Price struct {
 	FormattedValue  float64 `json:"formattedValue"`
 }
 
+type ElementCategory struct {
+	Name string `json:"name"`
+	Key  string `json:"key"`
+}
+
+type ElementFacets struct {
+	Category    *ElementCategory `json:"category,omitempty"`
+	Subcategory *ElementCategory `json:"subcategory,omitempty"`
+	Color       *ElementCategory `json:"color,omitempty"`
+	ColorFamily *ElementCategory `json:"colorFamily,omitempty"`
+	System      string           `json:"system,omitempty"`
+}
+
 type Brick struct {
-	ID               string `json:"id"`
-	DesignID         string `json:"designId"`
-	CollapseDesignID string `json:"collapseDesignId"`
-	Name             string `json:"name"`
-	ColorHex         string `json:"colorHex"`
-	ContrastColorHex string `json:"contrastColorHex"`
-	Price            Price  `json:"price"`
-	Availability     string `json:"availability"`
-	MaxOrderQuantity int    `json:"maxOrderQuantity"`
-	DeliveryChannel  string `json:"deliveryChannel"`
+	ID               string         `json:"id"`
+	DesignID         string         `json:"designId"`
+	CollapseDesignID string         `json:"collapseDesignId"`
+	Name             string         `json:"name"`
+	ColorHex         string         `json:"colorHex"`
+	ContrastColorHex string         `json:"contrastColorHex"`
+	Price            Price          `json:"price"`
+	Availability     string         `json:"availability"`
+	MaxOrderQuantity int            `json:"maxOrderQuantity"`
+	DeliveryChannel  string         `json:"deliveryChannel"`
+	Facets           *ElementFacets `json:"facets,omitempty"`
 }
 
 // FetchBricksByDesignID fetches all bricks matching the designID
