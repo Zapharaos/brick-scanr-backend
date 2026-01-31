@@ -588,6 +588,10 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 			brick.Quantity = qty
 			brick.BrickMinimal.Index = idx
 
+			// Calculate brick total price
+			brick.TotalPrice = brick.Price
+			brick.TotalPrice.CentAmount *= qty
+
 			// Add to updated Bricks list
 			result.Bricks = append(result.Bricks, brick)
 		}

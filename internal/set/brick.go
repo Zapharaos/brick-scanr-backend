@@ -47,13 +47,14 @@ func (bm *BrickMinimal) GetBrickIDForRedis() (BrickID, error) {
 
 type Brick struct {
 	BrickMinimal
-	Name     string `json:"name"`
-	ImageURL string `json:"image_url"`
-	Color    string `json:"color"`
-	ColorHex string `json:"color_hex"`
-	Quantity int    `json:"quantity"`
-	Price    Price  `json:"price"`
-	Prices   PricePerCurrencies
+	Name       string `json:"name"`
+	ImageURL   string `json:"image_url"`
+	Color      string `json:"color"`
+	ColorHex   string `json:"color_hex"`
+	Quantity   int    `json:"quantity"`
+	Price      Price  `json:"price"`
+	Prices     PricePerCurrencies
+	TotalPrice Price `json:"total_price"`
 }
 
 // MustApplyCurrency sets the Brick's Price and MainID based on the given locale tag if possible, otherwise does nothing

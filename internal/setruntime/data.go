@@ -62,7 +62,8 @@ func (rs *RuntimeSet) handleDataChangeCompleted(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
 		rs.refreshSet(change.Id)
-		rs.set.Bricks = utils.MapValues(rs.bricks)
+		//rs.set.Bricks = utils.MapValues(rs.bricks)
+		rs.calculateFinalData()
 		rs.broadcastPacket(NewPacketSet(rs.GetSet(), true))
 		break
 	default:
@@ -135,4 +136,32 @@ func (rs *RuntimeSet) refreshSet(setId uuid.UUID) {
 	rs.setMutex.Lock()
 	rs.set = cachedSet
 	rs.setMutex.Unlock()
+}
+
+func (rs *RuntimeSet) calculateFinalData() {
+	countMissingPrices := 0
+	sumTotalPriceCentAmount := 0
+
+	// Process each brick
+	for _, brick := range rs.bricks {
+
+		// Brick reference is missing price
+		if brick.Price.CentAmount == 0 {
+			countMissingPrices++
+			continue
+		}
+
+		// Calculate total price for the brick
+		brick.TotalPrice = brick.Price
+		brick.TotalPrice.CentAmount = brick.Price.CentAmount * brick.Quantity
+		sumTotalPriceCentAmount += brick.TotalPrice.CentAmount
+	}
+
+	// Use runtime bricks and update the set's bricks before broadcasting
+	rs.set.Bricks = utils.MapValues(rs.bricks)
+
+	// Update final data
+	rs.set.MissingParts = countMissingPrices
+	rs.set.TotalPrice = rs.set.Price
+	rs.set.TotalPrice.CentAmount = sumTotalPriceCentAmount
 }

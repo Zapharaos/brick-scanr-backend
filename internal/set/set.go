@@ -56,8 +56,10 @@ type Set struct {
 	Status          Status      `json:"status"`
 	Price           Price       `json:"price"`
 	Prices          PricePerCurrencies
+	TotalPrice      Price   `json:"total_price"`
 	InstructionsURL string  `json:"instructions_url"`
 	Parts           int     `json:"parts"`
+	MissingParts    int     `json:"missing_parts"`
 	Bricks          []Brick `json:"bricks"`
 	BricklinkID     int     `json:"bricklink_id"`
 	BricklinkNumber string  `json:"bricklink_number"`
