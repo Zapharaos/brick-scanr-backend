@@ -154,6 +154,9 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 	bricks := make([]set.Brick, 0, len(cachedSet.Bricks))
 	bricksWoPrices := make([]set.Brick, 0)
 
+	// Total cent amount accumulator
+	totalCentAmount := 0
+
 	// For each brick in the set, retrieve full data from cache and check for missing prices
 	for idx, brickMin := range cachedSet.Bricks {
 
@@ -197,6 +200,8 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 		} else {
 			// Price is valid and up-to-date, apply it
 			brick.MustApplyCurrency(currency)
+			brick.CalculateTotalPrice()
+			totalCentAmount += brick.TotalPrice.CentAmount
 		}
 
 		bricks = append(bricks, brick)
@@ -208,7 +213,12 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 			zap.String("set_id", setID.String()),
 			zap.String("currency", currency.String()),
 		)
+
+		// Update cached set with final data
+		cachedSet.MissingParts = 0
 		cachedSet.Bricks = bricks
+		cachedSet.ApplyTotalPrice(totalCentAmount)
+
 		return &CacheCheckResult{
 			Status: CacheStatusComplete,
 			Set:    cachedSet,
@@ -222,6 +232,10 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 		zap.Bool("set_price_outdated", setPriceOutdated),
 		zap.Int("bricks_wo_prices", len(bricksWoPrices)),
 	)
+
+	// Update cached set with final data
+	cachedSet.MissingParts = len(bricksWoPrices)
+	cachedSet.ApplyTotalPrice(totalCentAmount)
 
 	return &CacheCheckResult{
 		Status:           CacheStatusMissesPrices,

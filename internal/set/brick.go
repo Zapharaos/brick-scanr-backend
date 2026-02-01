@@ -74,12 +74,6 @@ func MapColorFromPickabrick(pab pickabrick.Brick) Color {
 	return color
 }
 
-func MapColorFromBricklink(colorName string) Color {
-	return Color{
-		Name: colorName,
-	}
-}
-
 // TODO : ISSUE #1 : Alternate items - cannot have index + quantity for a brick because this is related to a set
 
 type Brick struct {
@@ -107,6 +101,15 @@ func (b *Brick) BuildPickabrickURL(locale language.Tag) {
 	b.PickabrickURL = "https://www.lego.com/" + locale.String() + "/pick-and-build/pick-a-brick?selectedElement=" + id
 }
 
+// CleanupForRedis prepares the Brick for Redis storage by removing quantity and index, returning them for later use
+func (b *Brick) CleanupForRedis() (quantity, index int) {
+	quantity = b.Quantity
+	index = b.BrickMinimal.Index
+	b.Quantity = 0
+	b.BrickMinimal.Index = 0
+	return
+}
+
 // MustApplyCurrency sets the Brick's Price and MainID based on the given locale tag if possible, otherwise does nothing
 func (b *Brick) MustApplyCurrency(tag language.Tag) {
 	price, ok := b.Prices.GetPrice(tag)
@@ -116,6 +119,16 @@ func (b *Brick) MustApplyCurrency(tag language.Tag) {
 	b.Price = *price
 	brickID := BrickID(price.ItemID)
 	b.MainID = &brickID
+}
+
+// CalculateTotalPrice calculates the total price based on unit price and quantity
+func (b *Brick) CalculateTotalPrice() {
+	b.TotalPrice = Price{
+		CentAmount: b.Price.CentAmount * b.Quantity,
+		Currency:   b.Price.Currency,
+		ItemID:     b.Price.ItemID,
+		FetchedAt:  b.Price.FetchedAt,
+	}
 }
 
 // MapBrickFromBricklinkInventoryItem maps a Bricklink InventoryItem to an internal Brick representation

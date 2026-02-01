@@ -89,6 +89,16 @@ func (s *Set) MustApplyCurrency(tag language.Tag) {
 	s.Price = *price
 }
 
+// ApplyTotalPrice calculates the total price based on unit price and parts count
+func (s *Set) ApplyTotalPrice(centAmount int) {
+	s.TotalPrice = Price{
+		CentAmount: centAmount,
+		Currency:   s.Price.Currency,
+		ItemID:     s.Price.ItemID,
+		FetchedAt:  s.Price.FetchedAt,
+	}
+}
+
 // DetailsResponse represents the response for a set details request
 type DetailsResponse struct {
 	// WebsocketID is the WebSocket UUID to connect to for updates

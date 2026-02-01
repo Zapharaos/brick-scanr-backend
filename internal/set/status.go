@@ -8,7 +8,8 @@ import (
 type Status int
 
 const (
-	StatusRetired Status = iota
+	StatusUnknown Status = iota
+	StatusRetired
 	StatusOutOfStock
 	StatusBackorder
 	StatusAvailable

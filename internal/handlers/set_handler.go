@@ -43,7 +43,7 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO : ISSUE #1 - Search Alternate Items
+	// TODO : ISSUE #5 - Search Brick
 
 	// Search through BrickLink
 	bricklinkSets, err := bricklink.C().SearchSets(query)
@@ -169,7 +169,6 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		return
 
 	case setruntime.CacheStatusMissesPrices:
-		// TODO : NOW when fetching price but fails or not found, maybe mark the price as fetched but with smaller TTL ?
 		// Data is cached but needs price updates for requested currency
 		h.handleMissingPrices(w, r, setId, cacheResult, locale, currency)
 		return

@@ -123,25 +123,31 @@ func (h *Handler) FetchMissingPrices(
 		priceUpdated := false
 		for _, mb := range matchingBricks {
 			if set.BrickID(mb.ID) == brickID {
-				// Update brick with fetched price
-				pbp := set.MapPriceFromPickabrick(mb.Price)
-				pbp.ItemID = string(brickID)
-				pbp.FetchedAt = time.Now().UnixMilli()
-				if brick.Prices == nil {
-					brick.Prices = make(map[language.Tag]*set.Price)
-				}
-				brick.Prices[currency] = &pbp
 
-				// Cache the updated brick
+				// Update brick with fetched data from pickabrick
+				brick = set.MapBrickFromPickabrick(brick, brickID, mb, locale, currency)
+
+				// Temporarily hide index and quantity, redis brick instance can be shared across sets
+				quantity, index := brick.CleanupForRedis()
+
+				// Update brick in cache
 				if err = set.SetRedisBrick(ctx, brick, false); err != nil {
-					zap.L().Warn("Failed to cache updated brick price",
+					zap.L().Warn("Failed to update brick price in cache",
 						zap.Error(err),
 						zap.String("brick_id", string(brickID)),
 					)
 				}
 
-				// Apply currency
+				// Apply currency only locally
 				brick.MustApplyCurrency(currency)
+
+				// Restore index and quantity
+				brick.Quantity = quantity
+				brick.BrickMinimal.Index = index
+
+				// Calculate brick total price
+				brick.CalculateTotalPrice()
+
 				priceUpdated = true
 				break
 			}
@@ -517,8 +523,12 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 		zap.Int("batch_size", config.BatchSize),
 	)
 
-	// TODO : ISSUE #1 - Search Alternate Items & make sure progress is not over tracked due to alternates
-	// TODO: ISSUE #1 - Alternate items - alternate items add bricks to initial inventory, 85 instead of 70
+	// TODO: ISSUE #1 - Alternate items - alternate items add bricks to initial inventory and progress is over tracked
+	// Set 10349 - Has inventory of 70, but when fetching prices returns 84/85/86 ?
+	// It returns this : Reddish Brown Plate 4 x 6; Elément: 4211213, 4271874; Design: 3032; Quantity: 2;
+	// But also this : PLATE 4X6; Elément: 4271874; Design: 3032; Quantity: 2
+	// Which is the same item in the same color, except one has a single Element ID for which a price was found on pickabrick
+	// Same goes for brick 3031 in reddish brown as well
 
 	// Worker function: fetch prices for a single design ID
 	workerFunc := func(ctx context.Context, job PriceJob) (PriceJobResult, error) {
@@ -561,10 +571,7 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 			brick = set.MapBrickFromPickabrick(brick, brickID, mb, locale, currency)
 
 			// Temporarily hide index and quantity, redis brick instance can be shared across sets
-			qty := brick.Quantity
-			idx := brick.BrickMinimal.Index
-			brick.Quantity = 0
-			brick.BrickMinimal.Index = 0
+			quantity, index := brick.CleanupForRedis()
 
 			// Update brick in cache
 			if err = set.SetRedisBrick(ctx, brick, false); err != nil {
@@ -579,12 +586,11 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 			brick.MustApplyCurrency(currency)
 
 			// Restore index and quantity
-			brick.Quantity = qty
-			brick.BrickMinimal.Index = idx
+			brick.Quantity = quantity
+			brick.BrickMinimal.Index = index
 
 			// Calculate brick total price
-			brick.TotalPrice = brick.Price
-			brick.TotalPrice.CentAmount *= qty
+			brick.CalculateTotalPrice()
 
 			// Add to updated Bricks list
 			result.Bricks = append(result.Bricks, brick)
