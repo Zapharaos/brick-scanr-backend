@@ -189,6 +189,8 @@ func MapBrickFromPickabrick(brick Brick, brickID BrickID, pab pickabrick.Brick, 
 	brick.Prices[currency] = &pbp
 
 	// Update additional fields from Pick-a-Brick
+	brick.MainID = &brickID
+	brick.DesignID = DesignID(pab.DesignID)
 	brick.BuildPickabrickURL(locale)
 	brick.Status = MapPickabrickStatus(pab.Availability)
 	brick.Color = MapColorFromPickabrick(pab)

@@ -128,6 +128,24 @@ func (rs *RuntimeSet) HasClient(id uuid.UUID) bool {
 	return ok
 }
 
+// ClearBricks clear the Bricks slice
+func (rs *RuntimeSet) ClearBricks() {
+	rs.bricksMutex.Lock()
+	defer rs.bricksMutex.Unlock()
+	rs.bricks = make(map[string]set.Brick)
+}
+
+// UpdateBricks updates the Bricks slice in rs.set.Bricks
+func (rs *RuntimeSet) UpdateBricks(bricks []set.Brick) {
+	rs.setMutex.Lock()
+	rs.bricksMutex.Lock()
+	defer func() {
+		rs.setMutex.Unlock()
+		rs.bricksMutex.Unlock()
+	}()
+	rs.set.Bricks = bricks
+}
+
 // AddBrick adds or updates a brick in the runtime set
 func (rs *RuntimeSet) AddBrick(brick set.Brick) {
 	rs.bricksMutex.Lock()
@@ -229,13 +247,6 @@ func (rs *RuntimeSet) SetFetchError(err *set.FetchError) {
 	rs.setMutex.Lock()
 	defer rs.setMutex.Unlock()
 	rs.set.FetchError = err
-}
-
-// UpdateBricks updates the Bricks slice in rs.set.Bricks
-func (rs *RuntimeSet) UpdateBricks(bricks []set.Brick) {
-	rs.setMutex.Lock()
-	defer rs.setMutex.Unlock()
-	rs.set.Bricks = bricks
 }
 
 // GetSetID returns the set ID (immutable, no lock needed)

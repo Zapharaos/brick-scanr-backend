@@ -62,7 +62,6 @@ func (rs *RuntimeSet) handleDataChangeCompleted(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
 		rs.refreshSet(change.Id)
-		//rs.set.Bricks = utils.MapValues(rs.bricks)
 		rs.calculateFinalData()
 		rs.broadcastPacket(NewPacketSet(rs.GetSet(), true))
 		break
