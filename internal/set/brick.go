@@ -131,8 +131,8 @@ func (b *Brick) CalculateTotalPrice() {
 	}
 }
 
-// MapBrickFromBricklinkInventoryItem maps a Bricklink InventoryItem to an internal Brick representation
-func MapBrickFromBricklinkInventoryItem(bi bricklink.InventoryItem) Brick {
+// SafeMapBrickFromBricklinkInventoryItem safely maps a Bricklink InventoryItem to an existing Brick, updating only certain fields
+func SafeMapBrickFromBricklinkInventoryItem(brick Brick, bi bricklink.InventoryItem) Brick {
 	qty := 0
 	if bi.Quantity != "" {
 		if q, err := strconv.Atoi(bi.Quantity); err == nil {
@@ -153,18 +153,27 @@ func MapBrickFromBricklinkInventoryItem(bi bricklink.InventoryItem) Brick {
 		mainID = &ids[0]
 	}
 
-	return Brick{
-		BrickMinimal: BrickMinimal{
-			MainID:   mainID,
-			IDs:      ids,
-			DesignID: DesignID(bi.ItemNo),
-			Index:    bi.Index,
-			IsCustom: bi.IsCustom(),
-		},
-		Name:     bi.Description,
-		ImageURL: bi.ImageURL,
-		Quantity: qty,
+	// Update minimal fields
+	brick.MainID = mainID
+	brick.IDs = ids
+	brick.DesignID = DesignID(bi.ItemNo)
+	brick.Index = bi.Index
+	brick.IsCustom = bi.IsCustom()
+
+	// Update other fields
+	if brick.Name == "" {
+		// Only set name if not already set, pick-a-brick name has priority
+		brick.Name = bi.Description
 	}
+	brick.ImageURL = bi.ImageURL
+	brick.Quantity = qty
+
+	return brick
+}
+
+// MapBrickFromBricklinkInventoryItem maps a Bricklink InventoryItem to an internal Brick representation
+func MapBrickFromBricklinkInventoryItem(bi bricklink.InventoryItem) Brick {
+	return SafeMapBrickFromBricklinkInventoryItem(Brick{}, bi)
 }
 
 func MapBrickFromPickabrick(brick Brick, brickID BrickID, pab pickabrick.Brick, locale, currency language.Tag) Brick {

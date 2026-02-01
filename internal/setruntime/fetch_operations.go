@@ -403,14 +403,17 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 			brick, errW = set.GetRedisBrick(ctx, set.BrickID(item.ItemIDs[0]), set.DesignID(item.ItemNo))
 		}
 
-		// If no redis, map from BrickLink item
+		// If no redis yet, map from BrickLink item
 		if skipRedis || errW != nil {
 			brick = set.MapBrickFromBricklinkInventoryItem(item)
+		} else if !skipRedis && errW == nil {
+			// Different sources can update the brick redis instance, and bricklink is not the preferred source
+			// Therefore, we must be careful when updating the brick instance in redis and only update
+			brick = set.SafeMapBrickFromBricklinkInventoryItem(brick, item)
 		}
 
-		// TODO : ok we refresh TTL here but how do we avoid instances to be indefinitely cached and risk to miss on updates
-		// Maybe we need a global periodic cleanup job that remove old instances based on last fetched time + TTL ?
-		// Use a fetchedAt field for set and brick and prices
+		// Temporarily hide index and quantity, redis brick instance can be shared across sets
+		quantity, index := brick.CleanupForRedis()
 
 		// Cache the brick: either for the first time, or to refresh the TTL
 		if cacheErr := set.SetRedisBrick(ctx, brick, true); cacheErr != nil {
@@ -419,6 +422,10 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 				zap.String("brick_design_id", item.ItemNo),
 			)
 		}
+
+		// Restore index and quantity
+		brick.Quantity = quantity
+		brick.BrickMinimal.Index = index
 
 		return brick, nil
 	}

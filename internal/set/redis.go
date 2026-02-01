@@ -507,10 +507,6 @@ func SetRedisBrick(ctx context.Context, brick Brick, updateTTL bool) error {
 		return err
 	}
 
-	// Clean up any set related fields
-	brick.Index = 0
-	brick.Quantity = 0
-
 	// Marshal brick to JSON
 	brickJSON, err := json.Marshal(brick)
 	if err != nil {
@@ -533,10 +529,4 @@ func SetRedisBrick(ctx context.Context, brick Brick, updateTTL bool) error {
 	}
 
 	return SetRedisByKey(ctx, key, brickJSON, ttl, true)
-}
-
-// DeleteRedisBricklinkSet deletes a Set from Redis by its Bricklink ID
-func DeleteRedisBricklinkSet(ctx context.Context, bricklinkID string) error {
-	key := BuildKeyBricklinkIDToSet(bricklinkID)
-	return DeleteRedisKey(ctx, key)
 }
