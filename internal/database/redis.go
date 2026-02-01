@@ -20,10 +20,11 @@ type RedisDB struct {
 }
 
 type TTLS struct {
-	Set        time.Duration
-	SetPrice   time.Duration
-	Brick      time.Duration
-	BrickPrice time.Duration
+	Set                      time.Duration
+	SetPrice                 time.Duration
+	Brick                    time.Duration
+	BrickPrice               time.Duration
+	SetBricklinkMinThreshold time.Duration
 }
 
 type LockConfig struct {
@@ -65,10 +66,11 @@ func NewRedisDB() RedisDB {
 
 	// Load TTL settings, converted from seconds to time.Duration
 	ttls := TTLS{
-		Set:        viper.GetDuration("redis.ttls.set") * time.Second,
-		SetPrice:   viper.GetDuration("redis.ttls.set_price") * time.Second,
-		Brick:      viper.GetDuration("redis.ttls.brick") * time.Second,
-		BrickPrice: viper.GetDuration("redis.ttls.brick_price") * time.Second,
+		Set:                      viper.GetDuration("redis.ttls.set") * time.Second,
+		SetPrice:                 viper.GetDuration("redis.ttls.set_price") * time.Second,
+		Brick:                    viper.GetDuration("redis.ttls.brick") * time.Second,
+		BrickPrice:               viper.GetDuration("redis.ttls.brick_price") * time.Second,
+		SetBricklinkMinThreshold: viper.GetDuration("redis.ttls.set_bricklink_min_threshold") * time.Second,
 	}
 
 	// Load lock configuration settings

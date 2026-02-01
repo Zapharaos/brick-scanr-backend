@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
+	"github.com/Zapharaos/brick-scanr-backend/internal/database"
 	"github.com/Zapharaos/brick-scanr-backend/internal/handlers/render"
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
 	"github.com/Zapharaos/brick-scanr-backend/internal/setruntime"
@@ -71,7 +72,8 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Try to find the set in Redis cache by BrickLink ID
-		bricklinkSet, err := set.GetRedisBricklinkSet(r.Context(), fmt.Sprintf("%d", item.BricklinkID))
+		bricklinkID := fmt.Sprintf("%d", item.BricklinkID)
+		bricklinkSet, ttl, err := set.GetRedisBricklinkSet(r.Context(), bricklinkID)
 		if errors.Is(err, set.ErrKeyNotFound) {
 			// Not found in cache, store it atomically
 			// This will return the canonical set (with consistent UUID) even if another goroutine wins the race
@@ -93,9 +95,34 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 				zap.String("set_id", item.Id.String()),
 			)
 			continue
+		} else if set.IsTTLBelowThreshold(ttl, database.DB().Redis().TTLS.SetBricklinkMinThreshold) {
+			// Check if TTL is too low (about to expire soon)
+			// TTL is too low, delete the old cached data and refresh
+			zap.L().Info("Cached set TTL is below threshold, refreshing",
+				zap.String("set_id", bricklinkSet.Id.String()),
+				zap.Int("bricklink_id", item.BricklinkID),
+				zap.Duration("remaining_ttl", ttl),
+			)
+
+			// Delete the expired/about-to-expire data
+			set.MustDeleteRedisKey(r.Context(), set.BuildKeyBricklinkIDToSet(bricklinkID))
+
+			// Create a new cache entry, with a new setID to not conflict with existing one which may still be in use
+			// This will return the canonical set (with consistent UUID) even if another goroutine wins the race
+			canonicalSet, _, err := set.SetRedisBricklinkSet(r.Context(), item)
+			if err != nil {
+				// Failed to cache set, log but continue with the item we have
+				zap.L().Warn("Failed to cache set in Redis",
+					zap.Error(err),
+					zap.String("set_id", item.Id.String()),
+					zap.Int("bricklink_id", item.BricklinkID),
+				)
+			} else {
+				// Use the canonical set (which has the definitive UUID for this BrickLink ID)
+				item = canonicalSet
+			}
 		} else {
-			// TODO : what if the redis key expires by the time we finish executing this function? extend TTL on get ?
-			// Use the cached UUID
+			// No errors, data was found and TTL is fine, use the cached UUID
 			item.Id = bricklinkSet.Id
 		}
 

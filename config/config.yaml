@@ -52,6 +52,11 @@ redis:
     # Default value: 86400 (24 hours)
     brick_price: 86400
 
+    # Minimum TTL threshold in seconds - if a cached key has less than this remaining TTL,
+    # it will be considered as "about to expire" and will be refreshed to prevent data loss
+    # Default value: 900 (15 minutes)
+    set_bricklink_min_threshold: 900
+
 # Mock configuration
 # Enable this to use local mock data instead of real APIs (useful for offline development)
 mocks:

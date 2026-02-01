@@ -131,7 +131,7 @@ func (h *Handler) FetchMissingPrices(
 				quantity, index := brick.CleanupForRedis()
 
 				// Update brick in cache
-				if err = set.SetRedisBrick(ctx, brick, false); err != nil {
+				if err = set.SetRedisBrick(ctx, brick, true); err != nil {
 					zap.L().Warn("Failed to update brick price in cache",
 						zap.Error(err),
 						zap.String("brick_id", string(brickID)),
@@ -409,6 +409,9 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 		}
 
 		// TODO : ok we refresh TTL here but how do we avoid instances to be indefinitely cached and risk to miss on updates
+		// Maybe we need a global periodic cleanup job that remove old instances based on last fetched time + TTL ?
+		// Use a fetchedAt field for set and brick and prices
+
 		// Cache the brick: either for the first time, or to refresh the TTL
 		if cacheErr := set.SetRedisBrick(ctx, brick, true); cacheErr != nil {
 			zap.L().Warn("Failed to cache brick",
@@ -574,7 +577,7 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 			quantity, index := brick.CleanupForRedis()
 
 			// Update brick in cache
-			if err = set.SetRedisBrick(ctx, brick, false); err != nil {
+			if err = set.SetRedisBrick(ctx, brick, true); err != nil {
 				zap.L().Warn("Failed to update brick price in cache",
 					zap.Error(err),
 					zap.String("brick_design_id", string(job.DesignID)),

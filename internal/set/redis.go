@@ -24,6 +24,11 @@ var (
 	ErrFailedToGetTTL   = errors.New("failed to get TTL")
 )
 
+// IsTTLBelowThreshold checks if a given TTL is below a specified threshold
+func IsTTLBelowThreshold(ttl time.Duration, treshold time.Duration) bool {
+	return ttl > 0 && ttl < treshold
+}
+
 // BuildLockKey creates a consistent lock key for any Redis key
 func BuildLockKey(key string) string {
 	return fmt.Sprintf("lock:%s", key)
@@ -189,6 +194,7 @@ func SetRedisByKey(ctx context.Context, key string, value interface{}, ttl time.
 	})
 }
 
+// GetTtlForRedisKey retrieves the TTL for a given Redis key
 func GetTtlForRedisKey(ctx context.Context, key string) (time.Duration, error) {
 	// Retrieve the key from Redis
 	exists, err := database.DB().Redis().Client.Exists(ctx, key).Result()
@@ -210,10 +216,22 @@ func GetTtlForRedisKey(ctx context.Context, key string) (time.Duration, error) {
 	return RedisKeyNotFound, nil
 }
 
-func CleanupRedisKey(ctx context.Context, key string) {
-	if err := database.DB().Redis().Client.Del(ctx, key).Err(); err != nil {
-		zap.L().Warn("failed to cleanup after failure", zap.Error(err))
+// DeleteRedisKey deletes a Redis key, logging a warning if it fails
+func DeleteRedisKey(ctx context.Context, key string) error {
+	err := database.DB().Redis().Client.Del(ctx, key).Err()
+	if err != nil {
+		zap.L().Error("failed to delete redis key",
+			zap.String("key", key),
+			zap.Error(err),
+		)
+		return err
 	}
+	return nil
+}
+
+// MustDeleteRedisKey deletes a Redis key, ignoring any errors
+func MustDeleteRedisKey(ctx context.Context, key string) {
+	_ = DeleteRedisKey(ctx, key)
 }
 
 // BuildKeySet creates a Redis key for looking up Set by UUID
@@ -281,7 +299,8 @@ func GetRedisBricklinkID(ctx context.Context, setID uuid.UUID) (string, error) {
 
 // GetRedisBricklinkSet retrieves a Set from Redis by its Bricklink ID
 // Uses distributed locking when key doesn't exist to ensure consistency during concurrent writes
-func GetRedisBricklinkSet(ctx context.Context, bricklinkID string) (Set, error) {
+// Returns the Set and remaining TTL duration
+func GetRedisBricklinkSet(ctx context.Context, bricklinkID string) (Set, time.Duration, error) {
 	key := BuildKeyBricklinkIDToSet(bricklinkID)
 	data, err := GetRedisByKey(ctx, key, true) // Use lock on cache miss
 	if err != nil {
@@ -290,7 +309,7 @@ func GetRedisBricklinkSet(ctx context.Context, bricklinkID string) (Set, error) 
 			zap.String("bricklinkID", bricklinkID),
 			zap.Error(err),
 		)
-		return Set{}, err
+		return Set{}, RedisKeyNotFound, err
 	}
 
 	// Found cached data, unmarshal it
@@ -301,10 +320,21 @@ func GetRedisBricklinkSet(ctx context.Context, bricklinkID string) (Set, error) 
 			zap.String("bricklinkID", bricklinkID),
 			zap.Error(err),
 		)
-		return Set{}, err
+		return Set{}, RedisKeyNotFound, err
 	}
 
-	return cachedSet, nil
+	// Get remaining TTL for the key
+	ttl, err := GetTtlForRedisKey(ctx, key)
+	if err != nil {
+		zap.L().Error(
+			"failed to get TTL for cached data",
+			zap.String("bricklinkID", bricklinkID),
+			zap.Error(err),
+		)
+		return Set{}, RedisKeyNotFound, err
+	}
+
+	return cachedSet, ttl, nil
 }
 
 // GetRedisBricklinkSetFromSetID retrieves a Set from Redis by its Set ID using the Bricklink ID
@@ -315,7 +345,7 @@ func GetRedisBricklinkSetFromSetID(ctx context.Context, setID uuid.UUID) (Set, e
 		return Set{}, err
 	}
 
-	cachedSet, err := GetRedisBricklinkSet(ctx, bricklinkID)
+	cachedSet, _, err := GetRedisBricklinkSet(ctx, bricklinkID)
 	if err != nil {
 		return Set{}, err
 	}
@@ -503,4 +533,10 @@ func SetRedisBrick(ctx context.Context, brick Brick, updateTTL bool) error {
 	}
 
 	return SetRedisByKey(ctx, key, brickJSON, ttl, true)
+}
+
+// DeleteRedisBricklinkSet deletes a Set from Redis by its Bricklink ID
+func DeleteRedisBricklinkSet(ctx context.Context, bricklinkID string) error {
+	key := BuildKeyBricklinkIDToSet(bricklinkID)
+	return DeleteRedisKey(ctx, key)
 }
