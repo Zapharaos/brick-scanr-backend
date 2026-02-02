@@ -186,12 +186,15 @@ fragment ElementFacetCategory on ElementCategory {
 	req.Header.Set("Origin", "https://www.lego.com")
 	req.Header.Set("Referer", "https://www.lego.com/en-us/pick-and-build/pick-a-brick")
 
-	// Execute the request
-	resp, err := c.httpClient.Do(req)
+	// Execute the request with rate limiting and retry
+	resp, err := c.throttler.DoWithRetry(req.Context(), c.httpClient, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data: %w", err)
 	}
 	defer resp.Body.Close()
+
+	// Log rate limit headers if present
+	c.throttler.LogRateLimitHeaders(resp)
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -419,12 +422,15 @@ fragment ElementFacetCategory on ElementCategory {
 	req.Header.Set("Origin", "https://www.lego.com")
 	req.Header.Set("Referer", "https://www.lego.com/en-us/pick-and-build/pick-a-brick")
 
-	// Execute the request
-	resp, err := c.httpClient.Do(req)
+	// Execute the request with rate limiting and retry
+	resp, err := c.throttler.DoWithRetry(req.Context(), c.httpClient, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data: %w", err)
 	}
 	defer resp.Body.Close()
+
+	// Log rate limit headers if present
+	c.throttler.LogRateLimitHeaders(resp)
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)

@@ -201,3 +201,140 @@ setruntime:
   # Expressed as a Golang duration
   # Default value: "30s"
   set_change_check_freq: "30s"
+
+# API client rate limiting and retry configuration
+api_clients:
+
+  # Pick-a-Brick API client configuration
+  pickabrick:
+
+    # Random delay range between requests in milliseconds
+    # Delay will be randomly selected between min and max for each request
+    # Default values: min=100, max=300 (0.1-0.3 seconds between requests)
+    delay_min_ms: 100
+    delay_max_ms: 300
+
+    # Maximum requests per time window (throttle)
+    # Default value: 120 requests per 30 seconds
+    max_requests: 120
+    window_seconds: 30
+
+    # Retry configuration
+    retry:
+      # Maximum number of retry attempts
+      # Default value: 3
+      max_attempts: 5
+
+      # Initial backoff delay in milliseconds
+      # Default value: 1000 (1 second)
+      initial_backoff_ms: 1000
+
+      # Maximum backoff delay in milliseconds
+      # Default value: 60000 (60 seconds)
+      max_backoff_ms: 60000
+
+      # Backoff multiplier (exponential backoff)
+      # Default value: 2.0
+      backoff_multiplier: 2.0
+
+    # User agent rotation (leave empty to use OS-appropriate defaults)
+    user_agents: []
+
+    # Adaptive rate limiting (monitors response times and adjusts automatically)
+    adaptive:
+      # Enable adaptive rate limiting
+      # Default value: true
+      enabled: true
+
+      # Expected baseline response time in milliseconds
+      # Used to detect when the server is stressed
+      # Default value: 200ms (if responses start taking 600ms+, it's considered slow)
+      baseline_response_time_ms: 200
+
+      # Multiplier to determine "slow" threshold
+      # slow_threshold = baseline * multiplier
+      # Default value: 3.0 (3x baseline = slow)
+      slow_threshold_multiplier: 3.0
+
+  # LEGO API client configuration
+  lego:
+
+    # Random delay range between requests in milliseconds
+    # Delay will be randomly selected between min and max for each request
+    # Default values: min=100, max=300 (0.1-0.3 seconds between requests)
+    delay_min_ms: 100
+    delay_max_ms: 300
+
+    # Maximum requests per time window (throttle)
+    # Default value: 60 requests per 60 seconds
+    max_requests: 60
+    window_seconds: 60
+
+    # Retry configuration
+    retry:
+      # Maximum number of retry attempts
+      # Default value: 3
+      max_attempts: 3
+
+      # Initial backoff delay in milliseconds
+      # Default value: 1000 (1 second)
+      initial_backoff_ms: 1000
+
+      # Maximum backoff delay in milliseconds
+      # Default value: 30000 (30 seconds)
+      max_backoff_ms: 30000
+
+      # Backoff multiplier (exponential backoff)
+      # Default value: 2.0
+      backoff_multiplier: 2.0
+
+    # User agent rotation (leave empty to use OS-appropriate defaults)
+    user_agents: []
+
+    # Adaptive rate limiting (monitors response times and adjusts automatically)
+    adaptive:
+      enabled: true
+      baseline_response_time_ms: 300
+      slow_threshold_multiplier: 3.0
+
+  # BrickLink API client configuration, see : https://www.bricklink.com/v3/terms_of_use_api.page
+  bricklink:
+
+    # Random delay range between requests in milliseconds
+    # Delay will be randomly selected between min and max for each request
+    # Default values: min=100, max=300 (0.1-0.3 seconds between requests)
+    delay_min_ms: 100
+    delay_max_ms: 300
+
+    # Maximum requests per time window (throttle)
+    # Max according to the BrickLink API terms: 5K requests per day
+    # Default value: 200 requests per 60 seconds (1 minute)
+    max_requests: 200
+    window_seconds: 60
+
+    # Retry configuration
+    retry:
+      # Maximum number of retry attempts
+      # Default value: 3
+      max_attempts: 3
+
+      # Initial backoff delay in milliseconds
+      # Default value: 1000 (1 second)
+      initial_backoff_ms: 1000
+
+      # Maximum backoff delay in milliseconds
+      # Default value: 30000 (30 seconds)
+      max_backoff_ms: 30000
+
+      # Backoff multiplier (exponential backoff)
+      # Default value: 2.0
+      backoff_multiplier: 2.0
+
+    # User agent rotation (leave empty to use OS-appropriate defaults)
+    user_agents: []
+
+    # Adaptive rate limiting (monitors response times and adjusts automatically)
+    adaptive:
+      enabled: true
+      baseline_response_time_ms: 250
+      slow_threshold_multiplier: 3.0

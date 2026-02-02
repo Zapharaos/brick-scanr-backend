@@ -58,11 +58,16 @@ func (c *Client) FetchInventory(itemID int, setNumber string) (*Inventory, error
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 
 	zap.L().Info("Fetching BrickLink inventory", zap.String("url", requestURL))
-	resp, err := c.httpClient.Do(req)
+
+	// Execute the request with rate limiting and retry
+	resp, err := c.throttler.DoWithRetry(req.Context(), c.httpClient, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data: %w", err)
 	}
 	defer resp.Body.Close()
+
+	// Log rate limit headers if present
+	c.throttler.LogRateLimitHeaders(resp)
 
 	// Handle different HTTP status codes
 	if resp.StatusCode != http.StatusOK {

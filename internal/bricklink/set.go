@@ -67,11 +67,15 @@ func (c *Client) FetchSetDetails(itemID int) (*Set, error) {
 		zap.Int("item_id", itemID),
 		zap.String("url", requestURL))
 
-	resp, err := c.httpClient.Do(req)
+	// Execute the request with rate limiting and retry
+	resp, err := c.throttler.DoWithRetry(req.Context(), c.httpClient, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data: %w", err)
 	}
 	defer resp.Body.Close()
+
+	// Log rate limit headers if present
+	c.throttler.LogRateLimitHeaders(resp)
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)

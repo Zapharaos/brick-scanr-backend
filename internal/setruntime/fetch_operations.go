@@ -73,7 +73,7 @@ func (h *Handler) FetchMissingPrices(
 	}
 
 	// Create optimal config based on brick count
-	config := workerpool.NewConfigWithDefaults(bricksCount)
+	config := workerpool.NewConfigOptimal(bricksCount, len(h.sets))
 
 	// Create shared progress tracker
 	bprogress := NewProgress(bricksCount, config.BatchSize)
@@ -383,7 +383,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 	}
 
 	// Create optimal config based on item count
-	config := workerpool.NewConfigWithDefaults(inventorySize)
+	config := workerpool.NewConfigOptimal(inventorySize, len(h.sets))
 
 	// Create shared progress tracker
 	bprogress := NewProgress(inventorySize, config.BatchSize)
@@ -493,8 +493,11 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 	// Calculate total bricks
 	bricksSize := len(cpRedisSet.Bricks)
 
-	// Create optimal config based
-	config := workerpool.NewConfigWithDefaults(bricksSize)
+	// Create optimal config based on brick count
+	config := workerpool.NewConfigOptimal(bricksSize, len(h.sets))
+
+	// TODO : get rid of the mocks stuff
+	// TODO : inform frontend that 429 rate limit was reached?
 
 	// Create shared progress tracker
 	bprogress := NewProgress(bricksSize, config.BatchSize)
