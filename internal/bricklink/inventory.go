@@ -8,31 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Zapharaos/brick-scanr-backend/internal/mocks"
 	"go.uber.org/zap"
 	"golang.org/x/net/html"
 )
 
 // FetchInventory fetches the inventory data for a given set number
 func (c *Client) FetchInventory(itemID int, setNumber string) (*Inventory, error) {
-	// If mock mode is enabled, load from mock file
-	if c.useMocks {
-		zap.L().Info("Using mock data for BrickLink inventory", zap.String("set_number", setNumber))
-
-		htmlContent, err := mocks.LoadBricklinkInventoryMock(setNumber)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load mock inventory data: %w", err)
-		}
-
-		inventory, err := c.parseInventory(htmlContent, setNumber)
-
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse mock inventory: %w", err)
-		}
-
-		return inventory, nil
-	}
-
 	baseURL := "https://www.bricklink.com/v2/catalog/catalogitem_invtab.page"
 	params := url.Values{}
 	params.Add("idItem", fmt.Sprintf("%d", itemID))

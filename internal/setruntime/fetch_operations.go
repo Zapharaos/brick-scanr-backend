@@ -496,7 +496,6 @@ func (h *Handler) fetchPrices(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 	// Create optimal config based on brick count
 	config := workerpool.NewConfigOptimal(bricksSize, len(h.sets))
 
-	// TODO : get rid of the mocks stuff
 	// TODO : inform frontend that 429 rate limit was reached?
 
 	// Create shared progress tracker

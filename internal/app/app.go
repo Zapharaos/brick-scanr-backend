@@ -36,15 +36,7 @@ func Init(version, buildDate string) {
 
 // InitServices initializes all handler services
 func initServices() {
-	withMocks := viper.GetBool("mocks.enabled")
-	if withMocks {
-		zap.L().Warn("🔧 MOCK MODE ENABLED - Using local mock data")
-		bricklink.ReplaceGlobalClient(bricklink.NewClientWithMocks())
-		pickabrick.ReplaceGlobalClient(pickabrick.NewClientWithMocks())
-		lego.ReplaceGlobalClient(lego.NewClientWithMocks())
-	} else {
-		bricklink.ReplaceGlobalClient(bricklink.NewClient())
-		pickabrick.ReplaceGlobalClient(pickabrick.NewClient())
-		lego.ReplaceGlobalClient(lego.NewClient())
-	}
+	bricklink.ReplaceGlobalClient(bricklink.NewClient())
+	pickabrick.ReplaceGlobalClient(pickabrick.NewClient())
+	lego.ReplaceGlobalClient(lego.NewClient())
 }

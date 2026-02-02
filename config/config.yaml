@@ -57,13 +57,6 @@ redis:
     # Default value: 900 (15 minutes)
     set_bricklink_min_threshold: 900
 
-# Mock configuration
-# Enable this to use local mock data instead of real APIs (useful for offline development)
-mocks:
-  # Set to true to enable mock mode, false to use real APIs
-  # Default value: false
-  enabled: false
-
 # Server configuration
 server:
   # Specify the server host

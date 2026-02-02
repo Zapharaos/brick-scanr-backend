@@ -9,37 +9,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Zapharaos/brick-scanr-backend/internal/mocks"
 	"go.uber.org/zap"
 )
 
 // FetchSetDetails fetches detailed information for a set by its item ID
 func (c *Client) FetchSetDetails(itemID int) (*Set, error) {
 	itemIDStr := strconv.Itoa(itemID)
-
-	// If mock mode is enabled, load from mock file
-	if c.useMocks {
-		zap.L().Info("Using mock data for BrickLink set details", zap.Int("item_id", itemID))
-
-		data, err := mocks.LoadBricklinkSetDetailsMock(itemIDStr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load mock set details data: %w", err)
-		}
-
-		var setResp setDetailsResponse
-		if err := mocks.UnmarshalJSON(data, &setResp); err != nil {
-			return nil, err
-		}
-
-		if setResp.ReturnCode != 0 {
-			return nil, fmt.Errorf("mock set details API returned error code %d: %s",
-				setResp.ReturnCode, setResp.ReturnMessage)
-		}
-
-		zap.L().Info("Loaded set details from mock data", zap.Int("item_id", itemID))
-
-		return &setResp.Item, nil
-	}
 
 	baseURL := "https://www.bricklink.com/ajax/renovate/catalog/getItemImageList.ajax"
 	params := url.Values{}

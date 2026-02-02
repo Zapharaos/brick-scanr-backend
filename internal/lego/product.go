@@ -7,34 +7,12 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/Zapharaos/brick-scanr-backend/internal/mocks"
 	"go.uber.org/zap"
 	"golang.org/x/text/language"
 )
 
 // FetchProductDetails fetches product details from LEGO's official API using the product slug
 func (c *Client) FetchProductDetails(slug string, currency language.Tag) (*Product, error) {
-	// If mock mode is enabled, load from mock file
-	if c.useMocks {
-		zap.L().Info("Using mock data for LEGO product details", zap.String("slug", slug))
-
-		data, err := mocks.LoadLegoProductDetailsMock(slug)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load mock product details: %w", err)
-		}
-
-		var response ProductDetailsResponse
-		if err := mocks.UnmarshalJSON(data, &response); err != nil {
-			return nil, err
-		}
-
-		zap.L().Info("Successfully loaded mock LEGO product details",
-			zap.String("slug", slug),
-			zap.String("product_name", response.Data.Product.Name))
-
-		return &response.Data.Product, nil
-	}
-
 	// TODO : fix : review x-locale vs accept-language vs referer + front URL with those
 
 	// Build the GraphQL request URL
