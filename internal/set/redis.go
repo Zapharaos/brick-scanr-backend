@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/database"
@@ -234,23 +235,84 @@ func MustDeleteRedisKey(ctx context.Context, key string) {
 	_ = DeleteRedisKey(ctx, key)
 }
 
+// ---------------------------------------
+// Brick-specific Redis functions
+// ---------------------------------------
+
+func BuildKeyBrick(brickID BrickID) string {
+	return fmt.Sprintf("brick:%s", brickID)
+}
+
+// GetRedisBrick retrieves a Brick from Redis by its BrickID and currency
+func GetRedisBrick(ctx context.Context, brickID BrickID) (Brick, error) {
+	key := BuildKeyBrick(brickID)
+	data, err := GetRedisByKey(ctx, key, true)
+	if err != nil && !errors.Is(err, ErrKeyNotFound) {
+		zap.L().Error(
+			"failed to fetch brick data from redis",
+			zap.String("brickID", string(brickID)),
+			zap.Error(err),
+		)
+		return Brick{}, err
+	} else if data == "" || errors.Is(err, ErrKeyNotFound) {
+		return Brick{}, ErrKeyNotFound
+	}
+
+	// Found cached data, unmarshal it
+	var cachedBrick Brick
+	if err = json.Unmarshal([]byte(data), &cachedBrick); err != nil {
+		zap.L().Error(
+			"failed to unmarshal cached brick data",
+			zap.String("brickID", string(brickID)),
+			zap.Error(err),
+		)
+		return Brick{}, err
+	}
+
+	return cachedBrick, nil
+}
+
+// SetRedisBrick stores a Brick in Redis by its BrickID and currency
+func SetRedisBrick(ctx context.Context, brick Brick, updateTTL bool) error {
+	id, err := brick.GetBrickIDForRedis()
+	if err != nil {
+		zap.L().Error("failed to get brick ID for redis",
+			zap.Error(err),
+		)
+		return err
+	}
+
+	// Marshal brick to JSON
+	brickJSON, err := json.Marshal(brick)
+	if err != nil {
+		zap.L().Error("failed to marshal brick to JSON",
+			zap.Error(err),
+			zap.String("brickID", string(id)),
+			zap.String("designID", string(brick.DesignID)),
+		)
+		return err
+	}
+
+	key := BuildKeyBrick(id)
+
+	// Determine TTL
+	var ttl time.Duration
+	if updateTTL {
+		ttl = database.DB().Redis().TTLS.Brick
+	} else {
+		ttl = redis.KeepTTL
+	}
+
+	return SetRedisByKey(ctx, key, brickJSON, ttl, true)
+}
+
+// ---------------------------------------
+// Set-specific Redis functions
+// ---------------------------------------
+
 // BuildKeySet creates a Redis key for looking up Set by UUID
 func BuildKeySet(identifier uuid.UUID) string {
 	return fmt.Sprintf("set:%s", identifier)
-}
-
-// BuildKeyBricklinkIDToSet creates a Redis key for looking up Set by Bricklink ID
-func BuildKeyBricklinkIDToSet(bricklinkID string) string {
-	return fmt.Sprintf("set:bricklink:%s", bricklinkID)
-}
-
-// BuildKeySetIDToBricklinkID creates a Redis key for looking up Bricklink ID by Set ID
-func BuildKeySetIDToBricklinkID(setID uuid.UUID) string {
-	return fmt.Sprintf("set:%s:bricklink", setID)
-}
-
-func BuildKeyBrick(brickID BrickID, designID DesignID) string {
-	return fmt.Sprintf("brick:%s:%s", designID, brickID)
 }
 
 // GetRedisSet retrieves a Set from Redis by its UUID
@@ -280,198 +342,6 @@ func GetRedisSet(ctx context.Context, setID uuid.UUID) (Set, error) {
 	return cachedSet, nil
 }
 
-// GetRedisBricklinkID retrieves a Bricklink ID from Redis by Set ID
-// Uses distributed locking when key doesn't exist to ensure consistency during concurrent writes
-func GetRedisBricklinkID(ctx context.Context, setID uuid.UUID) (string, error) {
-	key := BuildKeySetIDToBricklinkID(setID)
-	data, err := GetRedisByKey(ctx, key, true) // Use lock on cache miss
-	if err != nil {
-		zap.L().Error(
-			"failed to fetch data from redis",
-			zap.String("setID", setID.String()),
-			zap.Error(err),
-		)
-		return "", err
-	}
-
-	return data, nil
-}
-
-// GetRedisBricklinkSet retrieves a Set from Redis by its Bricklink ID
-// Uses distributed locking when key doesn't exist to ensure consistency during concurrent writes
-// Returns the Set and remaining TTL duration
-func GetRedisBricklinkSet(ctx context.Context, bricklinkID string) (Set, time.Duration, error) {
-	key := BuildKeyBricklinkIDToSet(bricklinkID)
-	data, err := GetRedisByKey(ctx, key, true) // Use lock on cache miss
-	if err != nil {
-		zap.L().Error(
-			"failed to fetch data from redis",
-			zap.String("bricklinkID", bricklinkID),
-			zap.Error(err),
-		)
-		return Set{}, RedisKeyNotFound, err
-	}
-
-	// Found cached data, unmarshal it
-	var cachedSet Set
-	if err = json.Unmarshal([]byte(data), &cachedSet); err != nil {
-		zap.L().Error(
-			"failed to unmarshal cached data",
-			zap.String("bricklinkID", bricklinkID),
-			zap.Error(err),
-		)
-		return Set{}, RedisKeyNotFound, err
-	}
-
-	// Get remaining TTL for the key
-	ttl, err := GetTtlForRedisKey(ctx, key)
-	if err != nil {
-		zap.L().Error(
-			"failed to get TTL for cached data",
-			zap.String("bricklinkID", bricklinkID),
-			zap.Error(err),
-		)
-		return Set{}, RedisKeyNotFound, err
-	}
-
-	return cachedSet, ttl, nil
-}
-
-// GetRedisBricklinkSetFromSetID retrieves a Set from Redis by its Set ID using the Bricklink ID
-func GetRedisBricklinkSetFromSetID(ctx context.Context, setID uuid.UUID) (Set, error) {
-	// Retrieve BrickLink set ID from Redis
-	bricklinkID, err := GetRedisBricklinkID(ctx, setID)
-	if err != nil {
-		return Set{}, err
-	}
-
-	cachedSet, _, err := GetRedisBricklinkSet(ctx, bricklinkID)
-	if err != nil {
-		return Set{}, err
-	}
-
-	return cachedSet, nil
-}
-
-// GetRedisBrick retrieves a Brick from Redis by its BrickID and currency
-func GetRedisBrick(ctx context.Context, brickID BrickID, designID DesignID) (Brick, error) {
-	key := BuildKeyBrick(brickID, designID)
-	data, err := GetRedisByKey(ctx, key, true)
-	if err != nil && !errors.Is(err, ErrKeyNotFound) {
-		zap.L().Error(
-			"failed to fetch brick data from redis",
-			zap.String("brickID", string(brickID)),
-			zap.String("designID", string(designID)),
-			zap.Error(err),
-		)
-		return Brick{}, err
-	} else if data == "" || errors.Is(err, ErrKeyNotFound) {
-		return Brick{}, ErrKeyNotFound
-	}
-
-	// Found cached data, unmarshal it
-	var cachedBrick Brick
-	if err = json.Unmarshal([]byte(data), &cachedBrick); err != nil {
-		zap.L().Error(
-			"failed to unmarshal cached brick data",
-			zap.String("brickID", string(brickID)),
-			zap.String("designID", string(designID)),
-			zap.Error(err),
-		)
-		return Brick{}, err
-	}
-
-	return cachedBrick, nil
-}
-
-// SetRedisBricklinkSet stores a Set in Redis by its Bricklink ID and also maps the Set ID to the Bricklink ID
-// Uses distributed locking to ensure only one UUID is generated per BrickLink ID across concurrent requests
-// Returns the final Set (with consistent UUID) and a boolean indicating if this call created the entry
-func SetRedisBricklinkSet(ctx context.Context, set Set) (Set, bool, error) {
-	bricklinkID := fmt.Sprintf("%d", set.BricklinkID)
-	key := BuildKeyBricklinkIDToSet(bricklinkID)
-
-	var resultSet Set
-	var created bool
-
-	err := SetRedisByKeyCustom(ctx, key, true, func(ctx context.Context) error {
-		// Now that we have the lock, check if the set already exists
-		// IMPORTANT: Use useLock=false here because we already hold the lock!
-		data, err := GetRedisByKey(ctx, key, false)
-
-		if err == nil {
-			// Set already exists (another goroutine created it while we were waiting for the lock)
-			var existingSet Set
-			if unmarshalErr := json.Unmarshal([]byte(data), &existingSet); unmarshalErr != nil {
-				zap.L().Error("failed to unmarshal existing set",
-					zap.Error(unmarshalErr),
-					zap.Int("bricklink_id", set.BricklinkID),
-				)
-				return unmarshalErr
-			}
-
-			zap.L().Debug("Set already exists in cache, using existing UUID",
-				zap.String("existing_id", existingSet.Id.String()),
-				zap.String("new_id", set.Id.String()),
-				zap.Int("bricklink_id", set.BricklinkID),
-			)
-			resultSet = existingSet
-			created = false
-			return nil
-		} else if !errors.Is(err, ErrKeyNotFound) {
-			// Unexpected error
-			return err
-		}
-
-		// Set doesn't exist - create both mappings atomically using a transaction
-		setJSON, err := json.Marshal(set)
-		if err != nil {
-			zap.L().Error("failed to marshal set to JSON",
-				zap.Error(err),
-				zap.String("set_id", set.Id.String()),
-				zap.Int("bricklink_id", set.BricklinkID),
-			)
-			return err
-		}
-
-		// Use a transactional pipeline (MULTI/EXEC) to ensure both mappings are created atomically
-		tx := database.DB().Redis().Client.TxPipeline()
-
-		// Store BrickLink ID -> Set mapping
-		keyBricklinkIDToSet := BuildKeyBricklinkIDToSet(bricklinkID)
-		tx.Set(ctx, keyBricklinkIDToSet, setJSON, database.DB().Redis().TTLS.Set)
-
-		// Store Set ID -> BrickLink ID mapping (for reverse lookup)
-		keySetIDToBricklinkID := BuildKeySetIDToBricklinkID(set.Id)
-		tx.Set(ctx, keySetIDToBricklinkID, set.BricklinkID, database.DB().Redis().TTLS.Set)
-
-		// Execute transaction
-		if _, err := tx.Exec(ctx); err != nil {
-			zap.L().Error("failed to execute redis transaction for storing set",
-				zap.Error(err),
-				zap.String("set_id", set.Id.String()),
-				zap.Int("bricklink_id", set.BricklinkID),
-			)
-			return err
-		}
-
-		zap.L().Debug("Successfully created new set in cache",
-			zap.String("set_id", set.Id.String()),
-			zap.Int("bricklink_id", set.BricklinkID),
-		)
-
-		resultSet = set
-		created = true
-		return nil
-	})
-
-	if err != nil {
-		return set, false, err
-	}
-
-	return resultSet, created, nil
-}
-
 // SetRedisSet stores a Set in Redis by its UUID
 func SetRedisSet(ctx context.Context, set Set, updateTTL bool) error {
 	key := BuildKeySet(set.Id)
@@ -497,36 +367,117 @@ func SetRedisSet(ctx context.Context, set Set, updateTTL bool) error {
 	return SetRedisByKey(ctx, key, setJSON, ttl, true)
 }
 
-// SetRedisBrick stores a Brick in Redis by its BrickID and currency
-func SetRedisBrick(ctx context.Context, brick Brick, updateTTL bool) error {
-	id, err := brick.GetBrickIDForRedis()
+// ---------------------------------------
+// Bricklink-specific Redis functions
+// ---------------------------------------
+
+// BuildKeyBricklinkIDToSetID creates a Redis key for looking up Set by Bricklink ID
+func BuildKeyBricklinkIDToSetID(bricklinkID string) string {
+	return fmt.Sprintf("set:bricklink:%s", bricklinkID)
+}
+
+// GetRedisSetIDByBricklinkID retrieves the set uuid.UUID from Redis by its Bricklink ID
+// Uses distributed locking when key doesn't exist to ensure consistency during concurrent writes
+func GetRedisSetIDByBricklinkID(ctx context.Context, bricklinkID string) (uuid.UUID, error) {
+	key := BuildKeyBricklinkIDToSetID(bricklinkID)
+	data, err := GetRedisByKey(ctx, key, true) // Use lock on cache miss
 	if err != nil {
-		zap.L().Error("failed to get brick ID for redis",
+		zap.L().Error(
+			"failed to fetch data from redis",
+			zap.String("bricklinkID", bricklinkID),
 			zap.Error(err),
+		)
+		return uuid.Nil, err
+	}
+
+	// Found cached data, unmarshal it
+	var setID uuid.UUID
+	if setID, err = uuid.Parse(data); err != nil {
+		zap.L().Error(
+			"failed to parse set ID",
+			zap.String("bricklinkID", bricklinkID),
+			zap.Error(err),
+		)
+		return uuid.Nil, err
+	}
+
+	return setID, nil
+}
+
+// GetRedisSetByBricklinkID retrieves the Set from Redis by its Bricklink ID
+// Returns the Set, its remaining TTL, or an error if not found
+func GetRedisSetByBricklinkID(ctx context.Context, bricklinkID string) (Set, time.Duration, error) {
+	setID, err := GetRedisSetIDByBricklinkID(ctx, bricklinkID)
+	if err != nil {
+		return Set{}, RedisKeyNotFound, err
+	} else if setID == uuid.Nil {
+		return Set{}, RedisKeyNotFound, ErrKeyNotFound
+	}
+
+	// Fetch the full set by its UUID
+	set, err := GetRedisSet(ctx, setID)
+	if err != nil {
+		zap.L().Error(
+			"failed to fetch set data from redis by set ID",
+			zap.String("bricklinkID", bricklinkID),
+			zap.String("setID", setID.String()),
+			zap.Error(err),
+		)
+		return Set{}, RedisKeyNotFound, err
+	}
+
+	// Get remaining TTL for the set key
+	ttl, err := GetTtlForRedisKey(ctx, BuildKeySet(setID))
+	if err != nil {
+		zap.L().Error(
+			"failed to get TTL for cached data",
+			zap.String("bricklinkID", bricklinkID),
+			zap.String("setID", setID.String()),
+			zap.Error(err),
+		)
+		return Set{}, RedisKeyNotFound, err
+	}
+
+	return set, ttl, nil
+}
+
+// SetRedisSetIDForBricklinkID stores the set uuid.UUID in Redis by its Bricklink ID
+// Uses distributed locking to ensure only one UUID is generated per BrickLink ID across concurrent requests
+func SetRedisSetIDForBricklinkID(ctx context.Context, set Set, updateTTL bool) error {
+	key := BuildKeyBricklinkIDToSetID(strconv.Itoa(set.BricklinkID))
+
+	// Marshal set to JSON
+	setIdJSON, err := json.Marshal(set.Id)
+	if err != nil {
+		zap.L().Error("failed to marshal setID to JSON",
+			zap.Error(err),
+			zap.String("set_id", set.Id.String()),
 		)
 		return err
 	}
-
-	// Marshal brick to JSON
-	brickJSON, err := json.Marshal(brick)
-	if err != nil {
-		zap.L().Error("failed to marshal brick to JSON",
-			zap.Error(err),
-			zap.String("brickID", string(id)),
-			zap.String("designID", string(brick.DesignID)),
-		)
-		return err
-	}
-
-	key := BuildKeyBrick(id, brick.DesignID)
 
 	// Determine TTL
 	var ttl time.Duration
 	if updateTTL {
-		ttl = database.DB().Redis().TTLS.Brick
+		ttl = database.DB().Redis().TTLS.Set
 	} else {
 		ttl = redis.KeepTTL
 	}
 
-	return SetRedisByKey(ctx, key, brickJSON, ttl, true)
+	return SetRedisByKey(ctx, key, setIdJSON, ttl, true)
+}
+
+// SetRedisSetForBricklinkID stores both the set UUID mapping and the full set data in Redis by its Bricklink ID
+func SetRedisSetForBricklinkID(ctx context.Context, set Set, updateTTL bool) error {
+	// First, store the set ID mapping
+	if err := SetRedisSetIDForBricklinkID(ctx, set, updateTTL); err != nil {
+		return err
+	}
+
+	// Then, store the full set data
+	if err := SetRedisSet(ctx, set, updateTTL); err != nil {
+		return err
+	}
+
+	return nil
 }
