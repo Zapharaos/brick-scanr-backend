@@ -10,19 +10,9 @@ type PacketType string
 
 const (
 	PacketTypeInit           PacketType = "init"
-	PacketTypeLog            PacketType = "log"
-	PacketTypeError          PacketType = "error"
 	PacketTypeFatal          PacketType = "fatal"
-	PacketTypeSuccess        PacketType = "success"
 	PacketTypeSet            PacketType = "set"
 	PacketTypeInventoryBatch PacketType = "inventoryBatch"
-)
-
-type PacketErrorCode int
-
-const (
-	ErrorClientInvalidPacket = PacketErrorCode(iota + 1)
-	ErrorClientNotFound
 )
 
 type BatchStatus string
@@ -35,9 +25,7 @@ const (
 // packetSpec is a struct that contains all the possible packets, used for swagger doc and generation
 type packetSpec struct {
 	Packet               packet               `json:"packet"`
-	PacketLog            PacketLog            `json:"packetLog"`
 	PacketInit           PacketInit           `json:"packetInit"`
-	PacketError          PacketError          `json:"packetError"`
 	PacketFatal          PacketFatal          `json:"packetFatal"`
 	PacketSet            PacketSet            `json:"packetSet"`
 	PacketInventoryBatch PacketInventoryBatch `json:"packetInventoryBatch"`
@@ -63,39 +51,6 @@ func (p *packet) ToJSON() ([]byte, error) {
 // --------------------------------------------
 // --------------------------------------------
 
-type LogSeverity string
-
-const (
-	LogSeverityInfo    LogSeverity = "info"
-	LogSeverityWarning LogSeverity = "warning"
-	LogSeverityError   LogSeverity = "error"
-	LogSeverityFatal   LogSeverity = "fatal"
-)
-
-type PacketLog struct {
-	packet
-	Error    string      `json:"error"`
-	Severity LogSeverity `json:"severity"`
-}
-
-func NewPacketLog(severity LogSeverity, error string) *PacketLog {
-	return &PacketLog{
-		packet: packet{
-			Type: PacketTypeLog,
-		},
-		Error:    error,
-		Severity: severity,
-	}
-}
-
-func (p *PacketLog) ToJSON() ([]byte, error) {
-	return json.Marshal(p)
-}
-
-// --------------------------------------------
-// --------------------------------------------
-// --------------------------------------------
-
 // PacketInit is a packet to initialize the set
 type PacketInit struct {
 	packet
@@ -112,36 +67,6 @@ func NewPacketInit(set set.Set) *PacketInit {
 }
 
 func (p *PacketInit) ToJSON() ([]byte, error) {
-	return json.Marshal(p)
-}
-
-// NewPacketSuccess creates a new PacketSuccess
-func NewPacketSuccess(hash string) *packet {
-	return &packet{
-		Type: PacketTypeSuccess,
-		Hash: hash,
-	}
-}
-
-// PacketError is a packet to send an error
-type PacketError struct {
-	packet
-	Code PacketErrorCode `json:"code"`
-}
-
-// NewPacketError creates a new PacketError
-func NewPacketError(hash string, code PacketErrorCode) *PacketError {
-	return &PacketError{
-		packet: packet{
-			Type: PacketTypeError,
-			Hash: hash,
-		},
-		Code: code,
-	}
-}
-
-// ToJSON returns the JSON representation of the packet
-func (p *PacketError) ToJSON() ([]byte, error) {
 	return json.Marshal(p)
 }
 

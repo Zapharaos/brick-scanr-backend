@@ -195,9 +195,9 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 
-	case setruntime.CacheStatusMissesPrices:
+	case setruntime.CacheStatusMissesBricks:
 		// Data is cached but needs price updates for requested currency
-		h.handleMissingPrices(w, r, setId, cacheResult, locale, currency)
+		h.handleMissingBricks(w, r, setId, cacheResult, locale, currency)
 		return
 
 	case setruntime.CacheStatusFailed, setruntime.CacheStatusNeedsRefetch, setruntime.CacheStatusMissing:
@@ -211,8 +211,8 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleMissingPrices handles the case where we need to fetch missing prices
-func (h Handler) handleMissingPrices(w http.ResponseWriter, r *http.Request, setId uuid.UUID, cacheResult *setruntime.CacheCheckResult, locale, currency language.Tag) {
+// handleMissingBricks handles the case where we need to fetch missing bricks
+func (h Handler) handleMissingBricks(w http.ResponseWriter, r *http.Request, setId uuid.UUID, cacheResult *setruntime.CacheCheckResult, locale, currency language.Tag) {
 	// Create the key for this operation
 	key := setruntime.NewRuntimeSetKey(setId, currency, setruntime.OpTypePrices)
 
@@ -232,14 +232,14 @@ func (h Handler) handleMissingPrices(w http.ResponseWriter, r *http.Request, set
 		}
 	}
 
-	// Create websocket runtime for price fetching
+	// Create websocket runtime for fetching
 	rs := h.srh.RunSet(cacheResult.Set, currency, setruntime.OpTypePrices)
 
 	// Add all bricks to the runtime in their original order
 	rs.AddBricks(cacheResult.Bricks)
 
-	// Start goroutine to fetch missing prices
-	go h.srh.FetchMissingPrices(
+	// Start goroutine to fetch missing bricks
+	go h.srh.FetchMissingBricks(
 		context.Background(),
 		rs,
 		setId,

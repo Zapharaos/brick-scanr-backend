@@ -30,7 +30,7 @@ type dataChange struct {
 	Id       uuid.UUID
 	Type     DataType
 	Reason   DataChangeReason
-	Progress Progress
+	Progress Progress // Used when working with batches
 }
 
 // handleDataChangeCreated handles the creation of data
@@ -124,7 +124,7 @@ func (rs *RuntimeSet) handleDataChangeProgress(change dataChange) {
 	}
 }
 
-// refreshSet refreshes the set data from Redis
+// refreshSet refreshes the set data from Redis into the runtime set instance
 func (rs *RuntimeSet) refreshSet(setId uuid.UUID) {
 	cachedSet, err := set.GetRedisSet(context.Background(), setId)
 	if err != nil {
@@ -137,6 +137,7 @@ func (rs *RuntimeSet) refreshSet(setId uuid.UUID) {
 	rs.setMutex.Unlock()
 }
 
+// calculateFinalData calculates and updates the final data for the runtime set
 func (rs *RuntimeSet) calculateFinalData() {
 	countMissingPrices := 0
 	sumTotalPriceCentAmount := 0

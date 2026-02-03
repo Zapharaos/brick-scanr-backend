@@ -21,12 +21,16 @@ func Init(version, buildDate string) {
 
 	zap.L().Info("Starting BrickScanr API", zap.String("version", version), zap.String("build_date", buildDate))
 
+	// Initialize utilities
 	utils.RunInitWithTime(utils.InitDate, "Initializing Date")
 	utils.RunInitWithTime(utils.InitLocale, "Initializing Locale")
 	utils.RunInitWithTime(utils.InitCurrency, "Initializing Currency")
 
+	// Initialize Database
 	utils.RunInitWithTime(InitRedis, "Initializing Redis")
-	utils.RunInitWithTime(initServices, "Initializing Services")
+
+	// Initialize API clients
+	utils.RunInitWithTime(initApiClients, "Initializing API clients")
 
 	// Start databases health monitoring
 	database.StartHealthMonitoring("Redis", 30*time.Second, database.DB().Redis(), func() {
@@ -34,8 +38,8 @@ func Init(version, buildDate string) {
 	})
 }
 
-// InitServices initializes all handler services
-func initServices() {
+// initApiClients initializes all API clients
+func initApiClients() {
 	bricklink.ReplaceGlobalClient(bricklink.NewClient())
 	pickabrick.ReplaceGlobalClient(pickabrick.NewClient())
 	lego.ReplaceGlobalClient(lego.NewClient())

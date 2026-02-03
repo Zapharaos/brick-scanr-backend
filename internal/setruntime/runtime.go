@@ -1,8 +1,6 @@
 package setruntime
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -56,7 +54,6 @@ type RuntimeSet struct {
 	bricks      map[string]set.Brick
 
 	*clientHolder
-	receive    chan clientMessage
 	register   chan Client
 	unregister chan uuid.UUID
 	changeChan chan dataChange
@@ -78,7 +75,6 @@ func NewRuntimeSet(s set.Set, key RuntimeSetKey, opt RuntimeOptions, wg *sync.Wa
 		errorLogger:  errorLogger,
 		opt:          opt,
 		clientHolder: newClientHolder(true),
-		receive:      make(chan clientMessage, opt.ReceiveChanCap),
 		register:     make(chan Client, opt.ClientChanCap),
 		unregister:   make(chan uuid.UUID, opt.ClientChanCap),
 		changeChan:   make(chan dataChange, opt.ChangeChanCap),
@@ -108,11 +104,6 @@ func (rs *RuntimeSet) PushChange(change dataChange) {
 // Unregister returns the unregister channel
 func (rs *RuntimeSet) Unregister() chan uuid.UUID {
 	return rs.unregister
-}
-
-// Receive returns the reception channel
-func (rs *RuntimeSet) Receive() chan clientMessage {
-	return rs.receive
 }
 
 // Register returns the register channel
@@ -254,6 +245,17 @@ func (rs *RuntimeSet) GetSetID() uuid.UUID {
 	return rs.set.Id
 }
 
+// TODO : use asynclogger instead of zap inside the set runtime ?
+
+type LogSeverity string
+
+const (
+	LogSeverityInfo    LogSeverity = "info"
+	LogSeverityWarning LogSeverity = "warning"
+	LogSeverityError   LogSeverity = "error"
+	LogSeverityFatal   LogSeverity = "fatal"
+)
+
 // logError logs an error message
 func (rs *RuntimeSet) logError(scope string, err error) {
 	if rs.errorLogger == nil || err == nil {
@@ -288,7 +290,6 @@ func (rs *RuntimeSet) run() {
 
 	setActivityTimer := time.NewTimer(rs.opt.Timeout)
 	clientExpire := time.NewTicker(rs.opt.ClientTimeoutCheckFreq)
-	setChangesListenerTimer := time.NewTicker(rs.opt.setChangeCheckFreq)
 	defer func() {
 
 		// handle possible panics
@@ -309,68 +310,24 @@ func (rs *RuntimeSet) run() {
 			rs.handleClientConnect(cli)
 
 		case id := <-rs.unregister:
-			setActivityTimer.Reset(rs.opt.Timeout)
 			rs.handleClientDisconnect(id)
 
-		case msg := <-rs.receive:
-
-			// ignore messages from clients that are not connected
-			rs.clientMutex.RLock()
-			_, ok := rs.clients[msg.client.ID()]
-			rs.clientMutex.RUnlock()
-
-			if !ok {
-				continue
-			}
-
-			setActivityTimer.Reset(rs.opt.Timeout)
-
-			// handle the message
-			rs.handle(msg)
-
 		case change := <-rs.changeChan:
+			setActivityTimer.Reset(rs.opt.Timeout)
 			rs.handleDataChange(change)
 
 		case <-clientExpire.C:
 			rs.runClientExpireChecker()
 
-		case <-setChangesListenerTimer.C:
-			rs.checkForChanges()
+		case <-setActivityTimer.C:
+			rs.stop()
+			return
 
 		case <-rs.done:
 			rs.stop()
 			return
 		}
 	}
-}
-
-// handle handles a message
-func (rs *RuntimeSet) handle(msg clientMessage) {
-	// first we need to decode the packet
-	var p packet
-	err := json.Unmarshal(msg.data, &p)
-	if err != nil {
-		zap.L().Error("Failed to unmarshal packet", zap.Error(err))
-		return
-	}
-
-	if len(p.Hash) > 64 {
-		rs.clientFatal(msg.client.ID(), errors.New("packet hash is too long"))
-		return
-	}
-
-	// For now, clients can only receive updates
-
-	// then we need to check the type of packet
-	switch p.Type {
-
-	}
-}
-
-// checkForChanges checks for changes in the runtime set, like images, inventory, prices etc.
-func (rs *RuntimeSet) checkForChanges() {
-	// TODO : implement
-	// For client that joined while the process was already running, allow global refresh of data?
 }
 
 // handleDataChange handles a data change
@@ -390,27 +347,6 @@ func (rs *RuntimeSet) handleDataChange(change dataChange) {
 }
 
 // Client functions
-
-// clientFatal handles a fatal error
-func (rs *RuntimeSet) clientFatal(id uuid.UUID, err error) {
-
-	// unregister the client from the set
-	rs.unregister <- id
-
-	// send the error to the client
-	rs.clientMutex.RLock()
-	c, ok := rs.clients[id]
-	rs.clientMutex.RUnlock()
-
-	if !ok {
-		return
-	}
-
-	c.SendPacket(NewPacketLog(LogSeverityFatal, err.Error()))
-
-	// somehow close the client connection
-	c.close()
-}
 
 // handleClientConnect handles a client connect
 func (rs *RuntimeSet) handleClientConnect(client Client) {
@@ -438,16 +374,6 @@ func (rs *RuntimeSet) handleClientDisconnect(id uuid.UUID) {
 	if !ok {
 		return
 	}
-}
-
-// sendErrorPacket sends an error packet to a client
-func (rs *RuntimeSet) sendErrorPacket(client Client, packet packet, code PacketErrorCode) {
-	client.SendPacket(NewPacketError(packet.Hash, code))
-}
-
-// sendSuccessPacket sends a success packet to a client
-func (rs *RuntimeSet) sendSuccessPacket(client Client, packet packet) {
-	client.SendPacket(NewPacketSuccess(packet.Hash))
 }
 
 // runClientExpireChecker handles client expiration

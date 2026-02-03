@@ -30,8 +30,8 @@ const (
 	CacheStatusFailed
 	// CacheStatusComplete indicates data is fully cached and ready
 	CacheStatusComplete
-	// CacheStatusMissesPrices indicates data is cached but needs price updates
-	CacheStatusMissesPrices
+	// CacheStatusMissesBricks indicates data is cached but incomplete (missing bricks or prices)
+	CacheStatusMissesBricks
 	// CacheStatusNeedsRefetch indicates cached data is stale and needs complete refetch
 	CacheStatusNeedsRefetch
 	// CacheStatusFetching indicates data is currently being fetched
@@ -110,7 +110,7 @@ func (h *Handler) CheckCachedSet(ctx context.Context, setID uuid.UUID, currency 
 		zap.String("set_id", setID.String()),
 		zap.String("requested_currency", currency.String()),
 	)
-	return &CacheCheckResult{Status: CacheStatusMissesPrices}, nil
+	return &CacheCheckResult{Status: CacheStatusMissesBricks}, nil
 }
 
 func checkSetInRedis(ctx context.Context, setID uuid.UUID, currency language.Tag) (*CacheCheckResult, error) {
@@ -160,7 +160,6 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 	// For each brick in the set, retrieve full data from cache and check for missing prices
 	for idx, brickMin := range cachedSet.Bricks {
 
-		// TODO: ISSUE #1 - Alternate items
 		// Get brick ID for Redis lookup
 		brickID, err := brickMin.GetBrickIDForRedis()
 		if err != nil {
@@ -238,7 +237,7 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 	cachedSet.ApplyTotalPrice(totalCentAmount)
 
 	return &CacheCheckResult{
-		Status:           CacheStatusMissesPrices,
+		Status:           CacheStatusMissesBricks,
 		Set:              cachedSet,
 		SetPriceOutdated: setPriceOutdated,
 		Bricks:           bricks,

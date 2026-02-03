@@ -212,11 +212,6 @@ func (h *Handler) Shutdown() {
 	h.wg.Wait()
 }
 
-// IsSetRunning checks if a runtime set is running
-func (h *Handler) IsSetRunning(id uuid.UUID) bool {
-	return h.GetRuntimeSet(id) != nil
-}
-
 // onRuntimeSetEnd is called when a runtime set ends
 func (h *Handler) onRuntimeSetEnd(key RuntimeSetKey) {
 	h.RemoveRuntimeSet(key)

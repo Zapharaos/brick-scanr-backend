@@ -6,34 +6,35 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
 
 type Client interface {
 	ID() uuid.UUID
 	LastActivity() time.Time
-	Send(message string)
 	SendPacket(packet Packet)
 	close()
 }
 
-const (
-	// Time allowed to read the next pong message from the peer.
-	pongWait = 60 * time.Second
+// clientConfig holds configuration for client behavior
+type clientConfig struct {
+	PingPeriod                 time.Duration
+	SendChannelBufferSize      int
+	MaxConsecutiveSendFailures int
+}
 
-	// Send pings to peer with this period. Must be less than pongWait.
-	pingPeriod = (pongWait * 9) / 10
+func newClientConfig() clientConfig {
+	// Set defaults
+	viper.SetDefault("websocket.client.ping_period", 60)
+	viper.SetDefault("websocket.client.send_channel_buffer_size", 64)
+	viper.SetDefault("websocket.client.max_consecutive_send_failures", 10)
 
-	// Buffer size for the send channel to prevent blocking while allowing some buffering
-	sendChannelBufferSize = 64
-
-	// Maximum consecutive send failures before considering the client disconnected
-	maxConsecutiveSendFailures = 10
-)
-
-type clientMessage struct {
-	client *client
-	data   []byte
+	return clientConfig{
+		PingPeriod:                 viper.GetDuration("websocket.client.ping_period") * time.Second,
+		SendChannelBufferSize:      viper.GetInt("websocket.client.send_channel_buffer_size"),
+		MaxConsecutiveSendFailures: viper.GetInt("websocket.client.max_consecutive_send_failures"),
+	}
 }
 
 type client struct {
@@ -50,25 +51,28 @@ type client struct {
 	lastActivity            time.Time
 	consecutiveSendFailures int
 	mutex                   sync.RWMutex
+
+	config clientConfig // store websocket config for this client
 }
 
 func NewClient(rs *RuntimeSet, conn *websocket.Conn, userId uuid.UUID) Client {
+	config := newClientConfig()
 	cli := &client{
-		send:         make(chan []byte, sendChannelBufferSize),
+		send:         make(chan []byte, config.SendChannelBufferSize),
 		done:         make(chan struct{}),
 		conn:         conn,
 		rs:           rs,
 		userId:       userId,
 		lastActivity: time.Now(),
 		mutex:        sync.RWMutex{},
+		config:       config,
 	}
 
 	// Register the client with the runtime set
 	rs.Register() <- cli
 
 	// Start the read and write polling
-	go cli.startReadPolling()
-	go cli.startWritePolling(pingPeriod)
+	go cli.startWritePolling(config.PingPeriod)
 
 	return cli
 }
@@ -103,49 +107,6 @@ func (c *client) startWritePolling(pingPeriod time.Duration) {
 	}
 }
 
-// startReadPolling starts a goroutine that reads messages from the client
-func (c *client) startReadPolling() {
-	defer func() {
-		if err := c.conn.Close(); err != nil {
-			zap.L().Error("Error closing connection", zap.Error(err))
-		}
-		c.rs.Unregister() <- c.ID()
-		select {
-		case c.done <- struct{}{}:
-		default:
-		}
-		c.close()
-	}()
-
-	c.conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
-
-	for {
-		_, message, err := c.conn.ReadMessage()
-		if err != nil {
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
-				return
-			}
-
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				zap.L().Error("Error reading message IsUnexpectedCloseError", zap.Error(err))
-				return
-			}
-			zap.L().Error("Error reading message", zap.Error(err))
-			return
-		}
-
-		c.mutex.Lock()
-		c.lastActivity = time.Now()
-		c.mutex.Unlock()
-
-		c.rs.Receive() <- clientMessage{
-			client: c,
-			data:   message,
-		}
-	}
-}
-
 // ID returns the client's ID
 func (c *client) ID() uuid.UUID {
 	return c.userId
@@ -156,39 +117,6 @@ func (c *client) LastActivity() time.Time {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 	return c.lastActivity
-}
-
-// Send sends a message to the client
-func (c *client) Send(message string) {
-	data := []byte(message)
-
-	// Non-blocking send to prevent blocking the entire application
-	select {
-	case c.send <- data:
-		// Message sent successfully - reset failure counter
-		c.mutex.Lock()
-		c.consecutiveSendFailures = 0
-		c.mutex.Unlock()
-	default:
-		// Channel is blocked, track failures
-		c.mutex.Lock()
-		c.consecutiveSendFailures++
-		failures := c.consecutiveSendFailures
-		c.mutex.Unlock()
-
-		// Log and check if we should disconnect
-		zap.L().Warn("Client send channel blocked, dropping message",
-			zap.String("client_id", c.userId.String()),
-			zap.Int("consecutive_failures", failures))
-
-		// If too many consecutive failures, the client is likely disconnected
-		if failures >= maxConsecutiveSendFailures {
-			zap.L().Warn("Too many consecutive send failures, closing client connection",
-				zap.String("client_id", c.userId.String()),
-				zap.Int("failures", failures))
-			c.close()
-		}
-	}
 }
 
 // SendPacket sends a packet to the client
@@ -220,7 +148,7 @@ func (c *client) SendPacket(packet Packet) {
 			zap.Int("consecutive_failures", failures))
 
 		// If too many consecutive failures, the client is likely disconnected
-		if failures >= maxConsecutiveSendFailures {
+		if failures >= c.config.MaxConsecutiveSendFailures {
 			zap.L().Warn("Too many consecutive send failures, closing client connection",
 				zap.String("client_id", c.userId.String()),
 				zap.Int("failures", failures))

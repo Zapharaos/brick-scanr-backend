@@ -25,18 +25,6 @@ func newClientHolder(needsMutex bool) *clientHolder {
 	}
 }
 
-// broadcast sends a message to all clients
-func (e *clientHolder) broadcast(msg string) {
-	if e.needsMutex {
-		e.clientMutex.RLock()
-		defer e.clientMutex.RUnlock()
-	}
-
-	for _, c := range e.clients {
-		c.Send(msg)
-	}
-}
-
 // broadcastPacket sends a packet to all clients
 func (e *clientHolder) broadcastPacket(p Packet) {
 	if e.needsMutex {

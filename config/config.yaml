@@ -157,23 +157,32 @@ rate_limit:
     requests: 10
     window: 60
 
+# Websockets
+websocket:
+
+  client:
+
+    # Send pings to peer with this period.
+    # Default value: 60 seconds
+    ping_period: 60
+
+    # Buffer size for the send channel to prevent blocking while allowing some buffering
+    # Default value: 64
+    send_channel_buffer_size: 64
+
+    # Maximum consecutive send failures before considering the client disconnected
+    # Default value: 10
+    max_consecutive_send_failures: 10
+
 # Set runtime configuration
 setruntime:
   # Channel capacity for client connections
   # Default value: 100
   client_chan_cap: 100
 
-  # Channel capacity for receiving messages
-  # Default value: 100
-  receive_chan_cap: 100
-
   # Channel capacity for data changes
   # Default value: 20
   change_chan_cap: 20
-
-  # Channel capacity for commands
-  # Default value: 20
-  command_chan_cap: 20
 
   # Event timeout duration (how long event stays active without activity)
   # Expressed as a Golang duration
@@ -189,11 +198,6 @@ setruntime:
   # Expressed as a Golang duration
   # Default value: "30s"
   client_timeout_check_freq: "30s"
-
-  # Frequency of set changes checks
-  # Expressed as a Golang duration
-  # Default value: "30s"
-  set_change_check_freq: "30s"
 
 # API client rate limiting and retry configuration
 api_clients:
