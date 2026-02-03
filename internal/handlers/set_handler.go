@@ -44,12 +44,11 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO : ISSUE #5 - Search Brick
+	// Extract locale + currency from context
+	locale := GetLocaleFromContext(r)
+	currency := GetCurrencyFromContext(r)
 
-	// TODO: upgrade the search query to also fetch details from lego.com to get the slug for frontend URL + more detailed data when multiple results
-	// upon receiving the search results from bricklink API, for each set: fetchDetails() at this stage instead of later
-	// 1. fetch details from lego.com and get the slug which will be used in the frontend URL (still use uuid under the hood)
-	// 2. lego.com fails, we need to generate the slug ourselves (use strItemNo and strItemName probably)
+	// TODO : ISSUE #5 - Search Brick
 
 	// Search through BrickLink
 	bricklinkSets, err := bricklink.C().SearchSets(query)
@@ -66,63 +65,31 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 	sets := make([]set.Set, 0, len(bricklinkSets))
 	for _, s := range bricklinkSets {
 
-		// Map to internal representation
-		item, err := set.MapSetFromBricklinkSearch(s)
-		if err != nil {
-			zap.L().Error("Failed to map BrickLink set to internal representation",
-				zap.Error(err),
-				zap.String("set_number", s.StrItemNo),
-			)
+		// Process each search result
+		item, ok, created := handleSearchResultBricklinkSet(r.Context(), s)
+		if !ok {
+			// Error already logged, skip this item
 			continue
 		}
 
-		// Try to find the set in Redis cache by BrickLink ID
-		bricklinkID := fmt.Sprintf("%d", item.BricklinkID)
-		cachedSet, ttl, err := set.GetRedisSetByBricklinkID(r.Context(), bricklinkID)
-		if errors.Is(err, set.ErrKeyNotFound) {
-			// Not found in cache, store it atomically
-			// This will return the canonical set (with consistent UUID) even if another goroutine wins the race
-			err := set.SetRedisSetForBricklinkID(r.Context(), item, true)
+		// If the set was newly created, fetch full details
+		if created {
+			ok, err = set.FetchDetails(r.Context(), item.Id, &item, locale, currency)
 			if err != nil {
-				// Failed to cache set, log but continue with the item we have
-				zap.L().Warn("Failed to cache set in Redis",
+				// Error already logged, skip this item
+				continue
+			}
+
+			// Cache slug to set ID mapping
+			err = set.SetRedisSetIDForSlug(r.Context(), item, true)
+			if err != nil {
+				zap.L().Warn("Failed to cache slug to set ID mapping",
 					zap.Error(err),
 					zap.String("set_id", item.Id.String()),
-					zap.Int("bricklink_id", item.BricklinkID),
+					zap.String("slug", item.Slug),
 				)
+				continue
 			}
-		} else if err != nil {
-			zap.L().Error("Failed to check set in Redis cache",
-				zap.Error(err),
-				zap.String("set_id", item.Id.String()),
-			)
-			continue
-		} else if set.IsTTLBelowThreshold(ttl, database.DB().Redis().TTLS.SetBricklinkMinThreshold) {
-			// Check if TTL is too low (about to expire soon)
-			// TTL is too low, delete the old cached data and refresh
-			zap.L().Info("Cached set TTL is below threshold, refreshing",
-				zap.String("set_id", cachedSet.Id.String()),
-				zap.Int("bricklink_id", item.BricklinkID),
-				zap.Duration("remaining_ttl", ttl),
-			)
-
-			// Delete the expired/about-to-expire data
-			set.MustDeleteRedisKey(r.Context(), set.BuildKeyBricklinkIDToSetID(bricklinkID))
-
-			// Create a new cache entry, with a new setID to not conflict with existing one which may still be in use
-			// This will return the canonical set (with consistent UUID) even if another goroutine wins the race
-			err := set.SetRedisSetForBricklinkID(r.Context(), item, true)
-			if err != nil {
-				// Failed to cache set, log but continue with the item we have
-				zap.L().Warn("Failed to cache set in Redis",
-					zap.Error(err),
-					zap.String("set_id", item.Id.String()),
-					zap.Int("bricklink_id", item.BricklinkID),
-				)
-			}
-		} else {
-			// No errors, data was found and TTL is fine, use the cached UUID
-			item.Id = cachedSet.Id
 		}
 
 		sets = append(sets, item)
@@ -134,6 +101,73 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 	)
 
 	render.JSON(w, r, sets)
+}
+
+// handleSearchResultBricklinkSet processes a single BrickLink search item and returns the internal Set representation
+func handleSearchResultBricklinkSet(ctx context.Context, bsi bricklink.SearchItem) (set.Set, bool, bool) {
+	// Map to internal representation
+	item, err := set.MapSetFromBricklinkSearch(bsi)
+	if err != nil {
+		zap.L().Error("Failed to map BrickLink set to internal representation",
+			zap.Error(err),
+			zap.String("set_number", bsi.StrItemNo),
+		)
+		return set.Set{}, false, false
+	}
+
+	created := true
+
+	// Try to find the set in Redis cache by BrickLink ID
+	bricklinkID := fmt.Sprintf("%d", item.BricklinkID)
+	cachedSet, ttl, err := set.GetRedisSetByBricklinkID(ctx, bricklinkID)
+	if errors.Is(err, set.ErrKeyNotFound) {
+		// Not found in cache, store it atomically
+		// This will return the canonical set (with consistent UUID) even if another goroutine wins the race
+		err := set.SetRedisSetForBricklinkID(ctx, item, true)
+		if err != nil {
+			// Failed to cache set, log but continue with the item we have
+			zap.L().Warn("Failed to cache set in Redis",
+				zap.Error(err),
+				zap.String("set_id", item.Id.String()),
+				zap.Int("bricklink_id", item.BricklinkID),
+			)
+		}
+	} else if err != nil {
+		zap.L().Error("Failed to check set in Redis cache",
+			zap.Error(err),
+			zap.String("set_id", item.Id.String()),
+		)
+		return set.Set{}, false, false
+	} else if set.IsTTLBelowThreshold(ttl, database.DB().Redis().TTLS.SetBricklinkMinThreshold) {
+		// Check if TTL is too low (about to expire soon)
+		// TTL is too low, delete the old cached data and refresh
+		zap.L().Info("Cached set TTL is below threshold, refreshing",
+			zap.String("set_id", cachedSet.Id.String()),
+			zap.Int("bricklink_id", item.BricklinkID),
+			zap.Duration("remaining_ttl", ttl),
+		)
+
+		// Delete the expired/about-to-expire data
+		set.MustDeleteRedisKey(ctx, set.BuildKeyBricklinkIDToSetID(bricklinkID))
+
+		// Create a new cache entry, with a new setID to not conflict with existing one which may still be in use
+		// This will return the canonical set (with consistent UUID) even if another goroutine wins the race
+		err := set.SetRedisSetForBricklinkID(ctx, item, true)
+		if err != nil {
+			// Failed to cache set, log but continue with the item we have
+			zap.L().Warn("Failed to cache set in Redis",
+				zap.Error(err),
+				zap.String("set_id", item.Id.String()),
+				zap.Int("bricklink_id", item.BricklinkID),
+			)
+		}
+	} else {
+		// No errors, data was found and TTL is fine, use the cached UUID
+		item = cachedSet
+		created = false
+	}
+
+	return item, true, created
 }
 
 // FetchSetDetails godoc
@@ -152,10 +186,17 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400	{object}	render.ErrorResponse			"Bad Request"
 //	@Router			/api/v1/set/details/{id} [post]
 func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
-	setId, ok := ParseParamUUID(w, r, "id")
+	setId, ok := ParseParamUUIDSoft(r, "id")
 	if !ok {
-		w.WriteHeader(http.StatusNotFound)
-		return
+		// Param is not a UUID, might be a slug - try to resolve
+		slug := chi.URLParam(r, "id")
+		id, err := set.GetRedisSetIDBySlug(r.Context(), slug)
+		if err != nil {
+			// Slug not found either - return 404
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		setId = id // resolved UUID from slug
 	}
 
 	// Extract locale + currency from context

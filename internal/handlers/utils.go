@@ -13,18 +13,26 @@ import (
 	"golang.org/x/text/language"
 )
 
-// ParseParamUUID parses an uuid from the request parameters (using key parameter)
-func ParseParamUUID(w http.ResponseWriter, r *http.Request, key string) (uuid.UUID, bool) {
+// ParseParamUUIDSoft parses an uuid from the request parameters (using key parameter) without auto http status
+func ParseParamUUIDSoft(r *http.Request, key string) (uuid.UUID, bool) {
 	value := chi.URLParam(r, key)
 
 	result, err := uuid.Parse(value)
 	if err != nil {
 		zap.L().Debug("Parse uuid", zap.String("key", key), zap.Error(err))
-		render.BadRequest(w, r, fmt.Errorf("invalid %s", key))
 		return uuid.UUID{}, false
 	}
 
 	return result, true
+}
+
+// ParseParamUUID parses an uuid from the request parameters (using key parameter)
+func ParseParamUUID(w http.ResponseWriter, r *http.Request, key string) (uuid.UUID, bool) {
+	id, ok := ParseParamUUIDSoft(r, key)
+	if !ok {
+		render.BadRequest(w, r, fmt.Errorf("invalid %s", key))
+	}
+	return id, ok
 }
 
 // GetLocaleFromContext extracts the locale from the request context

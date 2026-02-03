@@ -7,7 +7,6 @@ import (
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
 	"github.com/Zapharaos/brick-scanr-backend/internal/database"
-	"github.com/Zapharaos/brick-scanr-backend/internal/lego"
 	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
 	"github.com/Zapharaos/brick-scanr-backend/internal/workerpool"
@@ -57,17 +56,9 @@ func (h *Handler) FetchCompleteSetDetails(
 	}
 	h.PushChange(rs.ID, setID, DataTypeSet, DataTypeCreated)
 
-	// Fetch set details asynchronously (independent of inventory/prices)
-	// Redis locks provide thread-safety across all operations
-	detailsErrChan := make(chan error, 1)
-	go func() {
-		detailsErrChan <- h.fetchDetails(ctx, rs.ID, setID, &cpRedisSet, locale, currency)
-	}()
-
 	// Fetch inventory from BrickLink (sequential - needed for prices)
 	if err := h.fetchInventory(ctx, rs.ID, setID, &cpRedisSet); err != nil {
-		<-detailsErrChan // Wait for goroutine to complete before returning
-		return           // Error already handled
+		return // Error already handled
 	}
 
 	// Clear bricks between batch progress to avoid duplicates
@@ -75,15 +66,7 @@ func (h *Handler) FetchCompleteSetDetails(
 
 	// Fetch prices from Pick-a-Brick (sequential - depends on inventory)
 	if err := h.fetchBricks(ctx, rs.ID, setID, &cpRedisSet, locale, currency); err != nil {
-		<-detailsErrChan // Wait for goroutine to complete before returning
-		return           // Error already handled
-	}
-
-	// Wait for async details fetch to complete
-	if detailsErr := <-detailsErrChan; detailsErr != nil {
-		// Details fetch failed, but inventory and prices succeeded
-		// This is already logged and handled by fetchDetails, just return
-		return
+		return // Error already handled
 	}
 
 	// Mark set fetch completed
@@ -101,82 +84,6 @@ func (h *Handler) FetchCompleteSetDetails(
 		zap.String("runtime_id", rs.ID.String()),
 		zap.String("set_id", setID.String()),
 	)
-}
-
-// fetchDetails fetches the details for a set
-func (h *Handler) fetchDetails(ctx context.Context, rsID uuid.UUID, setID uuid.UUID, cpRedisSet *set.Set, locale language.Tag, currency language.Tag) error {
-	// Fetch set details from BrickLink
-	bricklinkSet, err := bricklink.C().FetchSetDetails(cpRedisSet.BricklinkID)
-	if err != nil {
-		// Failed to fetch details => FATAL
-		handleFatalError(h, rsID, setID, set.FetchErrorFetchDetails, *cpRedisSet, DataTypeBricklinkDetails, err,
-			"Failed to fetch details from BrickLink")
-		return err
-	}
-
-	// Update cpRedisSet with fetched details
-	cpRedisSet.Number = bricklinkSet.StrItemNo
-	cpRedisSet.YearReleased = bricklinkSet.NYearReleased
-	cpRedisSet.Parts = bricklinkSet.NInvPartCnt
-	cpRedisSet.ImageURL = bricklinkSet.ImageList.GetMainImageURL()
-
-	err = set.SetRedisSet(ctx, *cpRedisSet, true)
-	if err != nil {
-		handleFatalError(h, rsID, setID, set.FetchErrorDetailsCache, *cpRedisSet, DataTypeSet, err,
-			"Failed to update Redis set inventory")
-		return err
-	}
-	h.PushChange(rsID, setID, DataTypeSet, DataTypeUpdated)
-
-	ok, err := h.fetchLegoProductDetails(ctx, rsID, setID, cpRedisSet, locale, currency, false)
-	if err == nil && ok {
-		h.PushChange(rsID, setID, DataTypeSet, DataTypeUpdated)
-	}
-
-	return nil
-}
-
-// fetchLegoProductDetails fetches product details from LEGO and updates the set
-func (h *Handler) fetchLegoProductDetails(ctx context.Context, rsID uuid.UUID, setID uuid.UUID, cpRedisSet *set.Set, locale language.Tag, currency language.Tag, priceOnly bool) (bool, error) {
-	// Fetch product details from LEGO
-	legoProduct, err := lego.C().FetchProductDetails(cpRedisSet.Number, currency)
-	if err != nil {
-		// Non-fatal: LEGO data is supplementary, log warning and continue
-		// This can happen for older or discontinued sets not present in LEGO's API, or for specific locales etc.
-		h.logWarning(setID, "LEGO.FetchProductDetails", err)
-		zap.L().Warn("Failed to fetch product details from LEGO",
-			zap.Error(err),
-			zap.String("set_number", cpRedisSet.Number),
-			zap.String("set_id", setID.String()),
-		)
-	} else {
-
-		if !priceOnly {
-			cpRedisSet.Slug = legoProduct.Slug
-			cpRedisSet.BuildLegoURL(locale)
-			cpRedisSet.BuildInstructionsURL(locale)
-			cpRedisSet.Status = set.MapLegoProductStatus(*legoProduct)
-		}
-
-		// Update set with fetched price
-		lp := set.MapPriceFromLego(legoProduct.Variant.Price)
-		lp.FetchedAt = time.Now().UnixMilli()
-		if cpRedisSet.Prices == nil {
-			cpRedisSet.Prices = make(map[language.Tag]*set.Price)
-		}
-		cpRedisSet.Prices[currency] = &lp
-		cpRedisSet.MustApplyCurrency(currency)
-
-		err = set.SetRedisSet(ctx, *cpRedisSet, true)
-		if err != nil {
-			handleFatalError(h, rsID, setID, set.FetchErrorDetailsCache, *cpRedisSet, DataTypeSet, err,
-				"Failed to update Redis set inventory")
-			return false, err
-		}
-
-		return true, nil
-	}
-	return false, nil
 }
 
 // fetchInventory fetches the inventory for a set from BrickLink using a worker pool
@@ -496,8 +403,11 @@ func (h *Handler) FetchMissingBricks(
 
 	// Check if set price is outdated
 	if cacheResult.SetPriceOutdated {
-		ok, err := h.fetchLegoProductDetails(ctx, rs.ID, setID, &cacheResult.Set, locale, currency, true)
-		if err == nil && ok {
+		ok, err := set.FetchLegoProductDetails(ctx, setID, &cacheResult.Set, locale, currency, true)
+		if err != nil {
+			handleFatalError(h, rs.ID, setID, set.FetchErrorDetailsCache, cacheResult.Set, DataTypeSet, err,
+				"Failed to update Redis set inventory")
+		} else if ok {
 			h.PushChange(rs.ID, setID, DataTypeSet, DataTypeUpdated)
 		}
 	}

@@ -1,9 +1,14 @@
 package set
 
 import (
+	"regexp"
+	"strings"
+	"unicode"
+
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
 	"github.com/google/uuid"
 	"golang.org/x/text/language"
+	"golang.org/x/text/unicode/norm"
 )
 
 type FetchStatus int
@@ -23,7 +28,6 @@ const (
 	FetchErrorDetailsCache
 	FetchErrorBatchCache
 	FetchErrorFinalCache
-	FetchErrorFetchDetails
 	FetchErrorFetchInventory
 	FetchErrorFetchPrices
 )
@@ -61,6 +65,58 @@ func (s *Set) BuildLegoURL(locale language.Tag) {
 
 func (s *Set) BuildInstructionsURL(locale language.Tag) {
 	s.InstructionsURL = "https://www.lego.com/" + locale.String() + "/service/building-instructions/" + s.Number
+}
+
+func (s *Set) GenerateSlug() {
+	var number string
+
+	// Handle set number: prefer explicit Number, otherwise extract first numeric part from BricklinkNumber (format: "<numbers>-<numbers>")
+	if s.Number != "" {
+		number = s.Number
+	} else {
+		raw := strings.TrimSpace(s.BricklinkNumber)
+		// try to extract the first sequence of digits
+		reNum := regexp.MustCompile(`\d+`)
+		if m := reNum.FindString(raw); m != "" {
+			number = m
+		} else {
+			// fallback: take substring before '-' if present, otherwise use the whole trimmed string
+			if idx := strings.Index(raw, "-"); idx != -1 {
+				number = raw[:idx]
+			} else {
+				number = raw
+			}
+		}
+	}
+
+	// Handle name: normalize (remove diacritics), lower-case, replace non-alphanumeric chars with '-' and trim/collapse dashes
+	name := s.Name
+	// Normalize to NFD to separate diacritics, then drop them
+	name = norm.NFD.String(name)
+	var b strings.Builder
+	for _, r := range name {
+		if unicode.Is(unicode.Mn, r) {
+			// skip diacritic marks
+			continue
+		}
+		b.WriteRune(r)
+	}
+	name = b.String()
+	name = strings.ToLower(name)
+
+	// Replace any sequence of characters that are not a-z or 0-9 with a single '-'
+	re := regexp.MustCompile(`[^a-z0-9]+`)
+	name = re.ReplaceAllString(name, "-")
+	name = strings.Trim(name, "-")
+
+	// Compose slug
+	if number != "" && name != "" {
+		s.Slug = name + "-" + number
+	} else if number != "" {
+		s.Slug = number
+	} else {
+		s.Slug = name
+	}
 }
 
 // MapSetFromBricklinkSearch maps a Bricklink search item to an internal Set representation

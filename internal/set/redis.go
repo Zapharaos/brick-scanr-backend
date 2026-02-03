@@ -481,3 +481,103 @@ func SetRedisSetForBricklinkID(ctx context.Context, set Set, updateTTL bool) err
 
 	return nil
 }
+
+// ---------------------------------------
+// Slug-specific Redis functions
+// ---------------------------------------
+
+// BuildKeySlug creates a Redis key for looking up Set by slug
+func BuildKeySlug(slug string) string {
+	return fmt.Sprintf("set:slug:%s", slug)
+}
+
+// GetRedisSetIDBySlug retrieves the set uuid.UUID from Redis by its slug
+// Uses distributed locking when key doesn't exist to ensure consistency during concurrent writes
+func GetRedisSetIDBySlug(ctx context.Context, slug string) (uuid.UUID, error) {
+	key := BuildKeySlug(slug)
+	data, err := GetRedisByKey(ctx, key, true) // Use lock on cache miss
+	if err != nil {
+		zap.L().Error(
+			"failed to fetch data from redis",
+			zap.String("slug", slug),
+			zap.Error(err),
+		)
+		return uuid.Nil, err
+	}
+
+	// Found cached data, unmarshal it
+	var setID uuid.UUID
+	if setID, err = uuid.Parse(data); err != nil {
+		zap.L().Error(
+			"failed to parse set ID",
+			zap.String("slug", slug),
+			zap.Error(err),
+		)
+		return uuid.Nil, err
+	}
+
+	return setID, nil
+}
+
+// GetRedisSetBySlug retrieves the Set from Redis by its slug
+// Returns the Set, its remaining TTL, or an error if not found
+func GetRedisSetBySlug(ctx context.Context, slug string) (Set, time.Duration, error) {
+	setID, err := GetRedisSetIDBySlug(ctx, slug)
+	if err != nil {
+		return Set{}, RedisKeyNotFound, err
+	} else if setID == uuid.Nil {
+		return Set{}, RedisKeyNotFound, ErrKeyNotFound
+	}
+
+	// Fetch the full set by its UUID
+	set, err := GetRedisSet(ctx, setID)
+	if err != nil {
+		zap.L().Error(
+			"failed to fetch set data from redis by set ID",
+			zap.String("slug", slug),
+			zap.String("setID", setID.String()),
+			zap.Error(err),
+		)
+		return Set{}, RedisKeyNotFound, err
+	}
+
+	// Get remaining TTL for the set key
+	ttl, err := GetTtlForRedisKey(ctx, BuildKeySet(setID))
+	if err != nil {
+		zap.L().Error(
+			"failed to get TTL for cached data",
+			zap.String("slug", slug),
+			zap.String("setID", setID.String()),
+			zap.Error(err),
+		)
+		return Set{}, RedisKeyNotFound, err
+	}
+
+	return set, ttl, nil
+}
+
+// SetRedisSetIDForSlug stores the set uuid.UUID in Redis by its slug
+// Uses distributed locking to ensure only one UUID is generated per slug across concurrent requests
+func SetRedisSetIDForSlug(ctx context.Context, set Set, updateTTL bool) error {
+	key := BuildKeySlug(set.Slug)
+
+	// Marshal set to JSON
+	setIdJSON, err := json.Marshal(set.Id)
+	if err != nil {
+		zap.L().Error("failed to marshal setID to JSON",
+			zap.Error(err),
+			zap.String("set_id", set.Id.String()),
+		)
+		return err
+	}
+
+	// Determine TTL
+	var ttl time.Duration
+	if updateTTL {
+		ttl = database.DB().Redis().TTLS.Set
+	} else {
+		ttl = redis.KeepTTL
+	}
+
+	return SetRedisByKey(ctx, key, setIdJSON, ttl, true)
+}
