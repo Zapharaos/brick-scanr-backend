@@ -128,6 +128,7 @@ func (rs *RuntimeSet) handleDataChangeProgress(change dataChange) {
 func (rs *RuntimeSet) refreshSet(setId uuid.UUID) {
 	cachedSet, err := set.GetRedisSet(context.Background(), setId)
 	if err != nil {
+		rs.logWarning("RuntimeSet.RefreshSet", err)
 		return
 	}
 

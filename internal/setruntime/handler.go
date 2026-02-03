@@ -216,3 +216,48 @@ func (h *Handler) Shutdown() {
 func (h *Handler) onRuntimeSetEnd(key RuntimeSetKey) {
 	h.RemoveRuntimeSet(key)
 }
+
+// logWarning logs a warning-level error to the async error logger
+// Used for non-critical errors that don't stop execution
+func (h *Handler) logWarning(setID uuid.UUID, scope string, err error) {
+	if h.ErrorLogger == nil || err == nil {
+		return
+	}
+
+	h.ErrorLogger.LogError(set.Error{
+		SetId:    setID,
+		Scope:    scope,
+		Message:  err.Error(),
+		Severity: "warning",
+	})
+}
+
+// logError logs an error-level error to the async error logger
+// Used for errors that may impact functionality but allow continued operation
+func (h *Handler) logError(setID uuid.UUID, scope string, err error) {
+	if h.ErrorLogger == nil || err == nil {
+		return
+	}
+
+	h.ErrorLogger.LogError(set.Error{
+		SetId:    setID,
+		Scope:    scope,
+		Message:  err.Error(),
+		Severity: "error",
+	})
+}
+
+// logCriticalError logs a critical-level error to the async error logger
+// Used for fatal errors that stop execution or cause operation failure
+func (h *Handler) logCriticalError(setID uuid.UUID, scope string, err error) {
+	if h.ErrorLogger == nil || err == nil {
+		return
+	}
+
+	h.ErrorLogger.LogError(set.Error{
+		SetId:    setID,
+		Scope:    scope,
+		Message:  err.Error(),
+		Severity: "critical",
+	})
+}

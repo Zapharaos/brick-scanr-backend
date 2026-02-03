@@ -2,6 +2,7 @@ package setruntime
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
@@ -26,6 +27,11 @@ func (h *Handler) FetchCompleteSetDetails(
 	currency language.Tag,
 ) {
 	defer func() {
+		// Handle panics gracefully
+		if r := recover(); r != nil {
+			h.logCriticalError(setID, "FetchCompleteSetDetails.Panic", fmt.Errorf("panic recovered: %v", r))
+			zap.L().Error("Panic in FetchCompleteSetDetails", zap.Any("panic", r), zap.String("set_id", setID.String()))
+		}
 		// Give clients time to receive the message before cleanup
 		time.Sleep(3 * time.Second)
 		h.StopRuntimeSet(rs.Key())
@@ -137,6 +143,7 @@ func (h *Handler) fetchLegoProductDetails(ctx context.Context, rsID uuid.UUID, s
 	if err != nil {
 		// Non-fatal: LEGO data is supplementary, log warning and continue
 		// This can happen for older or discontinued sets not present in LEGO's API, or for specific locales etc.
+		h.logWarning(setID, "LEGO.FetchProductDetails", err)
 		zap.L().Warn("Failed to fetch product details from LEGO",
 			zap.Error(err),
 			zap.String("set_number", cpRedisSet.Number),
@@ -225,6 +232,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 
 		// Cache the brick: either for the first time, or to refresh the TTL
 		if cacheErr := set.SetRedisBrick(ctx, brick, true); cacheErr != nil {
+			h.logWarning(setID, "Redis.SetRedisBrick", cacheErr)
 			zap.L().Warn("Failed to cache brick",
 				zap.Error(cacheErr),
 				zap.String("brick_design_id", item.ItemNo),
@@ -273,6 +281,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 
 	// Set error handler
 	pool.SetErrorHandler(func(err error) {
+		h.logWarning(setID, "Worker.InventoryProcessing", err)
 		zap.L().Warn("Worker encountered error processing brick",
 			zap.Error(err),
 		)
@@ -321,7 +330,9 @@ func (h *Handler) fetchBricks(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 			// Fetch for elementID
 			results, err := pickabrick.C().FetchBricksByBrickID(string(elementID), locale, currency)
 			if err != nil {
-				handleNonFatalError(err, "Failed to fetch brick by elementID",
+				h.logWarning(setID, "Pickabrick.FetchBricksByBrickID", err)
+				zap.L().Warn("Failed to fetch brick by elementID",
+					zap.Error(err),
 					zap.String("elementID", string(elementID)),
 					zap.String("set_id", setID.String()))
 				continue // Try next ID
@@ -348,6 +359,7 @@ func (h *Handler) fetchBricks(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 
 			// Update brick in cache
 			if err = set.SetRedisBrick(ctx, brick, true); err != nil {
+				h.logWarning(setID, "Redis.SetRedisBrick", err)
 				zap.L().Warn("Failed to update brick price in cache",
 					zap.Error(err),
 					zap.String("brick_design_id", string(brick.DesignID)),
@@ -404,6 +416,7 @@ func (h *Handler) fetchBricks(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 
 	// Set error handler
 	pool.SetErrorHandler(func(err error) {
+		h.logWarning(setID, "Worker.PriceProcessing", err)
 		zap.L().Warn("Worker encountered error processing price job",
 			zap.Error(err),
 		)
@@ -506,6 +519,7 @@ func (h *Handler) FetchMissingBricks(
 
 		brickID, err := brick.GetBrickIDForRedis()
 		if err != nil {
+			h.logWarning(setID, "Brick.GetBrickIDForRedis", err)
 			zap.L().Warn("Failed to get brick ID for redis",
 				zap.Error(err),
 			)
@@ -519,6 +533,7 @@ func (h *Handler) FetchMissingBricks(
 		matchingBricks, err := pickabrick.C().FetchBricksByBrickID(string(brickID), locale, currency)
 		if err != nil {
 			// Failed to fetch - log and continue
+			h.logWarning(setID, "Pickabrick.FetchBricksByBrickID", err)
 			zap.L().Warn("Failed to fetch brick for currency",
 				zap.Error(err),
 				zap.String("brick_id", string(brickID)),
@@ -544,6 +559,7 @@ func (h *Handler) FetchMissingBricks(
 
 				// Update brick in cache
 				if err = set.SetRedisBrick(ctx, brick, true); err != nil {
+					h.logWarning(setID, "Redis.SetRedisBrick", err)
 					zap.L().Warn("Failed to update brick price in cache",
 						zap.Error(err),
 						zap.String("brick_id", string(brickID)),
@@ -599,6 +615,7 @@ func (h *Handler) FetchMissingBricks(
 
 	// Set error handler
 	pool.SetErrorHandler(func(err error) {
+		h.logWarning(setID, "Worker.BrickPriceProcessing", err)
 		zap.L().Warn("Worker encountered error processing brick price",
 			zap.Error(err),
 		)
@@ -606,11 +623,11 @@ func (h *Handler) FetchMissingBricks(
 
 	// Process all brick price jobs
 	if err := pool.Process(jobs); err != nil {
-		zap.L().Error("Failed to process brick prices with worker pool",
-			zap.Error(err),
+		// Use handleFatalError for consistency - it already handles logging and client notification
+		handleFatalError(h, rs.ID, setID, set.FetchErrorFetchPrices, cacheResult.Set, DataTypePickabrickBricks, err,
+			"Failed to process brick prices with worker pool",
 			zap.String("runtime_id", rs.ID.String()),
 		)
-		h.PushChange(rs.ID, setID, DataTypeSet, DataTypeFailed)
 		return
 	}
 
@@ -623,8 +640,12 @@ func (h *Handler) FetchMissingBricks(
 }
 
 // handleFatalError handles fatal errors during set fetching
+// It logs the error asynchronously, updates cache, and notifies clients
 func handleFatalError(h *Handler, rsID uuid.UUID, setID uuid.UUID, step set.FetchErrorStep, data set.Set, dataType DataType, err error, msg string, fields ...zap.Field) {
-	// Log the error
+	// Log to async error logger for persistence/tracking
+	h.logCriticalError(setID, string(dataType), err)
+
+	// Log immediately to zap for operational visibility
 	zap.L().Error(msg, append(fields, zap.Error(err))...)
 
 	// Mark set as failed in cache with error details
@@ -635,13 +656,15 @@ func handleFatalError(h *Handler, rsID uuid.UUID, setID uuid.UUID, step set.Fetc
 	}
 
 	// Try to update cache - best effort, don't fail if this fails
-	_ = set.SetRedisSet(context.Background(), data, false)
+	if cacheErr := set.SetRedisSet(context.Background(), data, false); cacheErr != nil {
+		// Log cache update failure but don't propagate
+		h.logWarning(setID, "Redis.UpdateFailedStatus", cacheErr)
+		zap.L().Warn("Failed to update failed status in cache",
+			zap.Error(cacheErr),
+			zap.String("set_id", setID.String()),
+		)
+	}
 
 	// Notify all connected clients
 	h.PushChange(rsID, setID, dataType, DataTypeFailed)
-}
-
-// handleNonFatalError handles non-critical errors during set fetching
-func handleNonFatalError(err error, msg string, fields ...zap.Field) {
-	zap.L().Warn(msg, append(fields, zap.Error(err))...)
 }

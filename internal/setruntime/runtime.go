@@ -145,7 +145,11 @@ func (rs *RuntimeSet) AddBrick(brick set.Brick) {
 	// Create unique key from BrickID and DesignID
 	brickID, err := brick.GetBrickIDForRedis()
 	if err != nil {
-		zap.L().Warn("Failed to get brick ID for runtime storage", zap.Error(err))
+		rs.logWarning("RuntimeSet.AddBrick", err)
+		zap.L().Warn("Failed to get brick ID for runtime storage",
+			zap.Error(err),
+			zap.String("design_id", string(brick.DesignID)),
+		)
 		return
 	}
 	key := string(brickID) + ":" + string(brick.DesignID)
@@ -166,7 +170,11 @@ func (rs *RuntimeSet) AddBricks(bricks []set.Brick) {
 		// Create unique key from BrickID and DesignID
 		brickID, err := brick.GetBrickIDForRedis()
 		if err != nil {
-			zap.L().Warn("Failed to get brick ID for runtime storage", zap.Error(err))
+			rs.logWarning("RuntimeSet.AddBricks", err)
+			zap.L().Warn("Failed to get brick ID for runtime storage",
+				zap.Error(err),
+				zap.String("design_id", string(brick.DesignID)),
+			)
 			continue
 		}
 		key := string(brick.DesignID) + ":" + string(brickID)
@@ -245,18 +253,21 @@ func (rs *RuntimeSet) GetSetID() uuid.UUID {
 	return rs.set.Id
 }
 
-// TODO : use asynclogger instead of zap inside the set runtime ?
+// logWarning logs a warning-level error to the async error logger
+func (rs *RuntimeSet) logWarning(scope string, err error) {
+	if rs.errorLogger == nil || err == nil {
+		return
+	}
 
-type LogSeverity string
+	rs.errorLogger.LogError(set.Error{
+		Scope:    scope,
+		Message:  err.Error(),
+		Severity: "warning",
+		SetId:    rs.GetSetID(),
+	})
+}
 
-const (
-	LogSeverityInfo    LogSeverity = "info"
-	LogSeverityWarning LogSeverity = "warning"
-	LogSeverityError   LogSeverity = "error"
-	LogSeverityFatal   LogSeverity = "fatal"
-)
-
-// logError logs an error message
+// logError logs an error-level error to the async error logger
 func (rs *RuntimeSet) logError(scope string, err error) {
 	if rs.errorLogger == nil || err == nil {
 		return
@@ -265,7 +276,21 @@ func (rs *RuntimeSet) logError(scope string, err error) {
 	rs.errorLogger.LogError(set.Error{
 		Scope:    scope,
 		Message:  err.Error(),
-		Severity: string(LogSeverityError),
+		Severity: "error",
+		SetId:    rs.GetSetID(),
+	})
+}
+
+// logCritical logs a critical-level error to the async error logger
+func (rs *RuntimeSet) logCritical(scope string, err error) {
+	if rs.errorLogger == nil || err == nil {
+		return
+	}
+
+	rs.errorLogger.LogError(set.Error{
+		Scope:    scope,
+		Message:  err.Error(),
+		Severity: "critical",
 		SetId:    rs.GetSetID(),
 	})
 }
@@ -294,7 +319,12 @@ func (rs *RuntimeSet) run() {
 
 		// handle possible panics
 		if r := recover(); r != nil {
-			zap.L().Error("Panic in set runtime, recovering and stopping set", zap.Any("panic", r))
+			rs.logCritical("RuntimeSet.Panic", fmt.Errorf("panic recovered: %v", r))
+			zap.L().Error("Panic in set runtime, recovering and stopping set",
+				zap.Any("panic", r),
+				zap.String("runtime_id", rs.ID.String()),
+				zap.String("set_id", rs.GetSetID().String()),
+			)
 		}
 
 		setActivityTimer.Stop()
