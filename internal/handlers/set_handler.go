@@ -46,6 +46,11 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 
 	// TODO : ISSUE #5 - Search Brick
 
+	// TODO: upgrade the search query to also fetch details from lego.com to get the slug for frontend URL + more detailed data when multiple results
+	// upon receiving the search results from bricklink API, for each set: fetchDetails() at this stage instead of later
+	// 1. fetch details from lego.com and get the slug which will be used in the frontend URL (still use uuid under the hood)
+	// 2. lego.com fails, we need to generate the slug ourselves (use strItemNo and strItemName probably)
+
 	// Search through BrickLink
 	bricklinkSets, err := bricklink.C().SearchSets(query)
 	if err != nil {
@@ -73,11 +78,11 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 
 		// Try to find the set in Redis cache by BrickLink ID
 		bricklinkID := fmt.Sprintf("%d", item.BricklinkID)
-		bricklinkSet, ttl, err := set.GetRedisBricklinkSet(r.Context(), bricklinkID)
+		cachedSet, ttl, err := set.GetRedisSetByBricklinkID(r.Context(), bricklinkID)
 		if errors.Is(err, set.ErrKeyNotFound) {
 			// Not found in cache, store it atomically
 			// This will return the canonical set (with consistent UUID) even if another goroutine wins the race
-			canonicalSet, _, err := set.SetRedisBricklinkSet(r.Context(), item)
+			err := set.SetRedisSetForBricklinkID(r.Context(), item, true)
 			if err != nil {
 				// Failed to cache set, log but continue with the item we have
 				zap.L().Warn("Failed to cache set in Redis",
@@ -85,9 +90,6 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 					zap.String("set_id", item.Id.String()),
 					zap.Int("bricklink_id", item.BricklinkID),
 				)
-			} else {
-				// Use the canonical set (which has the definitive UUID for this BrickLink ID)
-				item = canonicalSet
 			}
 		} else if err != nil {
 			zap.L().Error("Failed to check set in Redis cache",
@@ -99,17 +101,17 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 			// Check if TTL is too low (about to expire soon)
 			// TTL is too low, delete the old cached data and refresh
 			zap.L().Info("Cached set TTL is below threshold, refreshing",
-				zap.String("set_id", bricklinkSet.Id.String()),
+				zap.String("set_id", cachedSet.Id.String()),
 				zap.Int("bricklink_id", item.BricklinkID),
 				zap.Duration("remaining_ttl", ttl),
 			)
 
 			// Delete the expired/about-to-expire data
-			set.MustDeleteRedisKey(r.Context(), set.BuildKeyBricklinkIDToSet(bricklinkID))
+			set.MustDeleteRedisKey(r.Context(), set.BuildKeyBricklinkIDToSetID(bricklinkID))
 
 			// Create a new cache entry, with a new setID to not conflict with existing one which may still be in use
 			// This will return the canonical set (with consistent UUID) even if another goroutine wins the race
-			canonicalSet, _, err := set.SetRedisBricklinkSet(r.Context(), item)
+			err := set.SetRedisSetForBricklinkID(r.Context(), item, true)
 			if err != nil {
 				// Failed to cache set, log but continue with the item we have
 				zap.L().Warn("Failed to cache set in Redis",
@@ -117,13 +119,10 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 					zap.String("set_id", item.Id.String()),
 					zap.Int("bricklink_id", item.BricklinkID),
 				)
-			} else {
-				// Use the canonical set (which has the definitive UUID for this BrickLink ID)
-				item = canonicalSet
 			}
 		} else {
 			// No errors, data was found and TTL is fine, use the cached UUID
-			item.Id = bricklinkSet.Id
+			item.Id = cachedSet.Id
 		}
 
 		sets = append(sets, item)
@@ -258,7 +257,7 @@ func (h Handler) handleMissingBricks(w http.ResponseWriter, r *http.Request, set
 // handleCompleteFetch handles the case where we need to perform a complete fetch
 func (h Handler) handleCompleteFetch(w http.ResponseWriter, r *http.Request, setId uuid.UUID, locale, currency language.Tag) {
 	// Retrieve BrickLink set info from cache
-	bricklinkSet, err := setruntime.GetBricklinkSetFromCache(r.Context(), setId)
+	cachedSet, err := set.GetRedisSet(r.Context(), setId)
 	if err != nil {
 		// TTL most likely expired - cannot proceed
 		render.NotFound(w, r, err)
@@ -266,14 +265,14 @@ func (h Handler) handleCompleteFetch(w http.ResponseWriter, r *http.Request, set
 	}
 
 	// Create websocket
-	rs := h.srh.RunSet(bricklinkSet, currency, setruntime.OpTypeFull)
+	rs := h.srh.RunSet(cachedSet, currency, setruntime.OpTypeFull)
 
 	// Start processing in background
 	go h.srh.FetchCompleteSetDetails(
 		context.Background(),
 		rs,
 		setId,
-		bricklinkSet,
+		cachedSet,
 		locale,
 		currency,
 	)

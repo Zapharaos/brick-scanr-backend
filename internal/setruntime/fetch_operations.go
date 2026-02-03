@@ -22,7 +22,7 @@ func (h *Handler) FetchCompleteSetDetails(
 	ctx context.Context,
 	rs *RuntimeSet,
 	setID uuid.UUID,
-	bricklinkSet set.Set,
+	cachedSet set.Set,
 	locale language.Tag,
 	currency language.Tag,
 ) {
@@ -44,7 +44,7 @@ func (h *Handler) FetchCompleteSetDetails(
 	)
 
 	// Initialize copy of set for Redis
-	cpRedisSet := bricklinkSet
+	cpRedisSet := cachedSet
 
 	// Cache the status => for concurrent access to the websocket
 	cpRedisSet.FetchStatus = set.FetchStatusFetching
@@ -57,7 +57,7 @@ func (h *Handler) FetchCompleteSetDetails(
 	}
 	h.PushChange(rs.ID, setID, DataTypeSet, DataTypeCreated)
 
-	// Fetch set details asynchronously (independent from inventory/prices)
+	// Fetch set details asynchronously (independent of inventory/prices)
 	// Redis locks provide thread-safety across all operations
 	detailsErrChan := make(chan error, 1)
 	go func() {
@@ -215,7 +215,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 		// Make sure we have at least one ItemID to lookup in cache
 		if !skipRedis {
 			// Try to find in cache first
-			brick, errW = set.GetRedisBrick(ctx, set.BrickID(item.ItemIDs[0]), set.DesignID(item.ItemNo))
+			brick, errW = set.GetRedisBrick(ctx, set.BrickID(item.ItemIDs[0]))
 		}
 
 		// If no redis yet, map from BrickLink item
@@ -310,8 +310,6 @@ func (h *Handler) fetchBricks(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 	// Create optimal config based on brick count
 	config := workerpool.NewConfigOptimal(bricksSize, len(h.sets))
 
-	// TODO : inform frontend that 429 rate limit was reached?
-
 	// Create shared progress tracker
 	bprogress := NewProgress(bricksSize, config.BatchSize)
 
@@ -326,6 +324,28 @@ func (h *Handler) fetchBricks(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 
 		// Try to find the best brick ID
 		for _, elementID := range brick.IDs {
+
+			// Check cache first
+			if cacheBrick, err := set.GetRedisBrick(ctx, elementID); err == nil && cacheBrick.HasValidPrice(currency) {
+				// Check if currency price is already set and valid
+				price, ok := brick.Prices.GetPrice(currency)
+				if ok && price.IsValid() && price.IsLower(cacheBrick.Price.CentAmount) &&
+					!price.IsOutdated(database.DB().Redis().TTLS.BrickPrice) {
+					continue
+				}
+
+				// Apply currency only locally
+				cacheBrick.MustApplyCurrency(currency)
+				cacheBrick.CalculateTotalPrice()
+
+				// Copy index and quantity (data specific to the set)
+				cacheBrick.Index = brick.Index
+				cacheBrick.Quantity = brick.Quantity
+
+				// Use cached brick
+				brick = cacheBrick
+				continue
+			}
 
 			// Fetch for elementID
 			results, err := pickabrick.C().FetchBricksByBrickID(string(elementID), locale, currency)

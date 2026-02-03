@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
+	"github.com/Zapharaos/brick-scanr-backend/internal/database"
 	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
 	"golang.org/x/text/language"
 )
@@ -106,6 +107,12 @@ func (b *Brick) CleanupForRedis() (quantity, index int) {
 	b.Quantity = 0
 	b.BrickMinimal.Index = 0
 	return
+}
+
+// HasValidPrice checks if the Brick has a valid and up-to-date price for the given locale tag
+func (b *Brick) HasValidPrice(tag language.Tag) bool {
+	price, ok := b.Prices.GetPrice(tag)
+	return ok && price.IsValid() && !price.IsOutdated(database.DB().Redis().TTLS.BrickPrice)
 }
 
 // MustApplyCurrency sets the Brick's Price and MainID based on the given locale tag if possible, otherwise does nothing

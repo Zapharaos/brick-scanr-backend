@@ -2,7 +2,6 @@ package setruntime
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/database"
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
@@ -170,7 +169,7 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 		}
 
 		// Try to find brick in cache
-		brick, err := set.GetRedisBrick(ctx, brickID, brickMin.DesignID)
+		brick, err := set.GetRedisBrick(ctx, brickID)
 		if err != nil {
 			// Brick cache expired - set data is stale
 			zap.L().Warn("Brick cache expired, set data is stale",
@@ -243,13 +242,4 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 		Bricks:           bricks,
 		BricksWoPrices:   bricksWoPrices,
 	}, nil
-}
-
-// GetBricklinkSetFromCache retrieves BrickLink set info from cache by set ID
-func GetBricklinkSetFromCache(ctx context.Context, setID uuid.UUID) (set.Set, error) {
-	bricklinkSet, err := set.GetRedisBricklinkSetFromSetID(ctx, setID)
-	if err != nil {
-		return set.Set{}, fmt.Errorf("failed to retrieve BrickLink set from cache: %w", err)
-	}
-	return bricklinkSet, nil
 }

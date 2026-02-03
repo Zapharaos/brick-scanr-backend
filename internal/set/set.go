@@ -56,7 +56,7 @@ type Set struct {
 }
 
 func (s *Set) BuildLegoURL(locale language.Tag) {
-	s.LegoURL = "https://www.lego.com/" + locale.String() + "product/" + s.Slug
+	s.LegoURL = "https://www.lego.com/" + locale.String() + "/product/" + s.Slug
 }
 
 func (s *Set) BuildInstructionsURL(locale language.Tag) {
