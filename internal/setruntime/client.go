@@ -19,6 +19,7 @@ type Client interface {
 
 // clientConfig holds configuration for client behavior
 type clientConfig struct {
+	PongWait                   time.Duration
 	PingPeriod                 time.Duration
 	SendChannelBufferSize      int
 	MaxConsecutiveSendFailures int
@@ -26,11 +27,13 @@ type clientConfig struct {
 
 func newClientConfig() clientConfig {
 	// Set defaults
-	viper.SetDefault("websocket.client.ping_period", 60)
+	viper.SetDefault("websocket.client.pong_wait", 60)
+	viper.SetDefault("websocket.client.ping_period", 60*9/10) // 90% of pong wait
 	viper.SetDefault("websocket.client.send_channel_buffer_size", 64)
 	viper.SetDefault("websocket.client.max_consecutive_send_failures", 10)
 
 	return clientConfig{
+		PongWait:                   viper.GetDuration("websocket.client.pong_wait") * time.Second,
 		PingPeriod:                 viper.GetDuration("websocket.client.ping_period") * time.Second,
 		SendChannelBufferSize:      viper.GetInt("websocket.client.send_channel_buffer_size"),
 		MaxConsecutiveSendFailures: viper.GetInt("websocket.client.max_consecutive_send_failures"),
@@ -72,9 +75,54 @@ func NewClient(rs *RuntimeSet, conn *websocket.Conn, userId uuid.UUID) Client {
 	rs.Register() <- cli
 
 	// Start the read and write polling
+	go cli.startReadPolling()
 	go cli.startWritePolling(config.PingPeriod)
 
 	return cli
+}
+
+// startReadPolling starts a goroutine that reads messages from the client
+func (c *client) startReadPolling() {
+	defer func() {
+		if err := c.conn.Close(); err != nil {
+			zap.L().Error("Error closing connection", zap.Error(err))
+		}
+		c.rs.Unregister() <- c.ID()
+		select {
+		case c.done <- struct{}{}:
+		default:
+		}
+		c.close()
+	}()
+
+	c.conn.SetReadDeadline(time.Now().Add(c.config.PongWait))
+	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(c.config.PongWait)); return nil })
+
+	for {
+		_, _, err := c.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
+				return
+			}
+
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				zap.L().Error("Error reading message IsUnexpectedCloseError", zap.Error(err))
+				return
+			}
+			zap.L().Error("Error reading message", zap.Error(err))
+			return
+		}
+
+		c.mutex.Lock()
+		c.lastActivity = time.Now()
+		c.mutex.Unlock()
+
+		// We are not processing client messages in this implementation
+		/*c.rs.Receive() <- clientMessage{
+			client: c,
+			data:   message,
+		}*/
+	}
 }
 
 func (c *client) startWritePolling(pingPeriod time.Duration) {
