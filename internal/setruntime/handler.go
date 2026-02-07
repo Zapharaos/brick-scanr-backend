@@ -141,9 +141,23 @@ func (h *Handler) RemoveRuntimeSet(key RuntimeSetKey) {
 func (h *Handler) PushChange(rsId, changedId uuid.UUID, dType DataType, reason DataChangeReason) {
 	if rs := h.GetRuntimeSet(rsId); rs != nil {
 		rs.PushChange(dataChange{
-			Id:     changedId,
-			Type:   dType,
-			Reason: reason,
+			Id:        changedId,
+			Type:      dType,
+			Reason:    reason,
+			PullCache: true,
+		})
+	}
+}
+
+// PushChangeSet pushes a change with an associated data set to the runtime set, if it exists
+func (h *Handler) PushChangeSet(rsId, changedId uuid.UUID, dType DataType, reason DataChangeReason, set set.SetExternal) {
+	if rs := h.GetRuntimeSet(rsId); rs != nil {
+		rs.PushChange(dataChange{
+			Id:        changedId,
+			Type:      dType,
+			Reason:    reason,
+			Set:       set,
+			PullCache: false,
 		})
 	}
 }

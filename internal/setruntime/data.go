@@ -27,18 +27,26 @@ const (
 )
 
 type dataChange struct {
-	Id       uuid.UUID
-	Type     DataType
-	Reason   DataChangeReason
-	Progress Progress // Only used when working with batches
+	Id        uuid.UUID
+	Type      DataType
+	Reason    DataChangeReason
+	Progress  Progress        // Only used when working with batches
+	Set       set.SetExternal // Optional field to send data without
+	PullCache bool            // Indicates whether the change requires pulling the latest data from cache
 }
 
 // handleDataChangeCreated handles the creation of data
 func (rs *RuntimeSet) handleDataChangeCreated(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
-		rs.pullSetFromCache(change.Id)
-		rs.broadcastPacket(NewPacketSet(rs.GetSet(), false))
+		var s set.SetExternal
+		if change.PullCache {
+			rs.pullSetFromCache(change.Id)
+			s = rs.GetSet()
+		} else {
+			s = change.Set
+		}
+		rs.broadcastPacket(NewPacketSet(s, false))
 		break
 	default:
 		break
@@ -49,8 +57,14 @@ func (rs *RuntimeSet) handleDataChangeCreated(change dataChange) {
 func (rs *RuntimeSet) handleDataChangeUpdated(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
-		rs.pullSetFromCache(change.Id)
-		rs.broadcastPacket(NewPacketSet(rs.GetSet(), false))
+		var s set.SetExternal
+		if change.PullCache {
+			rs.pullSetFromCache(change.Id)
+			s = rs.GetSet()
+		} else {
+			s = change.Set
+		}
+		rs.broadcastPacket(NewPacketSet(s, false))
 		break
 	default:
 		break
@@ -61,9 +75,15 @@ func (rs *RuntimeSet) handleDataChangeUpdated(change dataChange) {
 func (rs *RuntimeSet) handleDataChangeCompleted(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
-		rs.pullSetFromCache(change.Id)
-		rs.calculateFinalData()
-		rs.broadcastPacket(NewPacketSet(rs.GetSet(), true))
+		var s set.SetExternal
+		if change.PullCache {
+			rs.pullSetFromCache(change.Id)
+			rs.calculateFinalData()
+			s = rs.GetSet()
+		} else {
+			s = change.Set
+		}
+		rs.broadcastPacket(NewPacketSet(s, false))
 		break
 	default:
 		break

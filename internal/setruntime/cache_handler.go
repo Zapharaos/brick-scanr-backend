@@ -179,15 +179,16 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 		if err != nil {
 			// Brick price for requested currency is missing or outdated
 			bricksWoPrices = append(bricksWoPrices, brickSet)
+			bricks = append(bricks, brickSet)
 			continue
 		}
 
 		// Update BrickSet with most recent Brick data from cache
 		brickSet.Brick = brick
-
 		if !set.HasValidPrice(brick.Prices, currency, database.DB().Redis().TTLS.BrickPrice) {
 			// Brick price for requested currency is missing or outdated
 			bricksWoPrices = append(bricksWoPrices, brickSet)
+			bricks = append(bricks, brickSet)
 			continue
 		}
 

@@ -18,6 +18,24 @@ type BrickSet struct {
 	TotalPrice Price `json:"total_price"`
 }
 
+// CleanupForCache clears fields that are not needed for caching and returns cleaned up data for later restoration
+func (bs *BrickSet) CleanupForCache() (Price, Price) {
+	copyPrice := bs.Price
+	copyTotalPrice := bs.TotalPrice
+
+	// Clear fields that are not needed for caching
+	bs.Price = Price{}
+	bs.TotalPrice = Price{}
+
+	return copyPrice, copyTotalPrice
+}
+
+// RestoreAfterCache restores the original data after caching
+func (bs *BrickSet) RestoreAfterCache(price Price, totalPrice Price) {
+	bs.Price = price
+	bs.TotalPrice = totalPrice
+}
+
 // MustApplyCurrency sets the Brick's Price and MainID based on the given locale tag if possible, otherwise does nothing
 func (bs *BrickSet) MustApplyCurrency(tag language.Tag) {
 	price, ok := bs.Prices.GetPrice(tag)

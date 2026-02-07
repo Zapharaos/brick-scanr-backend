@@ -67,6 +67,14 @@ func (b *Brick) BuildPickabrickURL(locale language.Tag) {
 	b.PickabrickURL = "https://www.lego.com/" + locale.String() + "/pick-and-build/pick-a-brick?selectedElement=" + id
 }
 
+// SetPrice sets the price for the given currency in the Brick's Prices map
+func (b *Brick) SetPrice(price Price, currency language.Tag) {
+	if b.Prices == nil {
+		b.Prices = make(map[language.Tag]*Price)
+	}
+	b.Prices[currency] = &price
+}
+
 // HasValidPrice checks if the Brick has a valid and up-to-date price for the given locale tag
 func (b *Brick) HasValidPrice(currency language.Tag) bool {
 	return HasValidPrice(b.Prices, currency, database.DB().Redis().TTLS.BrickPrice)

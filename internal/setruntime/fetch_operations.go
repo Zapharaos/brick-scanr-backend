@@ -9,6 +9,7 @@ import (
 	"github.com/Zapharaos/brick-scanr-backend/internal/database"
 	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
+	"github.com/Zapharaos/brick-scanr-backend/internal/utils"
 	"github.com/Zapharaos/brick-scanr-backend/internal/workerpool"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -71,14 +72,13 @@ func (h *Handler) FetchSetComplete(
 		return // Error already handled
 	}
 
-	// Clear bricks between batch progress to avoid duplicates
-	rs.ClearBricks()
-	// TODO : when clearing here, is someone else joins at this moment he then receives a set wo bricks
-
 	// Fetch prices from Pick-a-Brick (sequential - depends on inventory)
-	if err := h.fetchBricks(ctx, rs.ID, setID, &cpRedisSet, locale, currency); err != nil {
+	if err := h.fetchBricks(ctx, rs, setID, &cpRedisSet, locale, currency); err != nil {
 		return // Error already handled
 	}
+
+	// Cleanup up
+	cpRedisSet.CleanupForCache()
 
 	// Mark set fetch completed
 	cpRedisSet.FetchStatus = set.FetchStatusCompleted
@@ -190,7 +190,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 }
 
 // fetchBricks fetches prices for all Bricks in a set from Pick-a-Brick using a worker pool
-func (h *Handler) fetchBricks(ctx context.Context, rsID uuid.UUID, setID uuid.UUID, cpRedisSet *set.Set, locale language.Tag, currency language.Tag) error {
+func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, setID uuid.UUID, cpRedisSet *set.Set, locale language.Tag, currency language.Tag) error {
 	// Calculate total bricks
 	bricksSize := len(cpRedisSet.Bricks)
 
@@ -208,77 +208,13 @@ func (h *Handler) fetchBricks(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 
 	// Worker function: fetch prices for a single design ID
 	workerFunc := func(ctx context.Context, brick set.BrickSet) (set.BrickSet, error) {
-		// TODO : clean up
 		return h.workerHandlerBrickPrice(ctx, setID, brick, locale, currency)
-
-		/*// Try to find the best brick ID
-		for _, elementID := range brick.IDs {
-
-			// Check cache first and has valid item price for the currency
-			if cacheBrick, err := set.GetRedisBrick(ctx, elementID); err == nil &&
-				set.HasValidPrice(cacheBrick.Prices, currency, database.DB().Redis().TTLS.BrickPrice) {
-
-				// Check if current price currency is already set, valid and lower
-				if brick.Brick.HasLowerPrice(cacheBrick, currency) {
-					continue
-				}
-
-				// Update brick with cached data from pickabrick and apply final currency data
-				brick.Brick = cacheBrick
-				brick.MustApplyCurrency(currency)
-				brick.CalculateTotalPrice()
-
-				continue
-			}
-
-			// Fetch for elementID
-			results, err := pickabrick.C().FetchBricksByBrickID(string(elementID), locale, currency)
-			if err != nil {
-				h.logWarning(setID, "Pickabrick.FetchBricksByBrickID", err)
-				zap.L().Warn("Failed to fetch brick by elementID",
-					zap.Error(err),
-					zap.String("elementID", string(elementID)),
-					zap.String("set_id", setID.String()))
-				continue // Try next ID
-			}
-
-			if len(results) == 0 {
-				continue
-			}
-
-			pabb := results[0] // There should be only one matching brick per ID
-
-			// Check if currency price is already set and valid
-			price, _ := brick.Prices.GetPrice(currency)
-			if brick.Brick.HasValidPrice(currency) && price.IsLower(pabb.Price.CentAmount) {
-				continue
-			}
-
-			// Update brick with fetched data from pickabrick
-			brick.Brick = set.MapBrickFromPickabrick(brick.Brick, elementID, pabb, locale, currency)
-
-			// Update brick in cache
-			if err = set.SetRedisBrick(ctx, brick.Brick, true); err != nil {
-				h.logWarning(setID, "Redis.SetRedisBrick", err)
-				zap.L().Warn("Failed to update brick price in cache",
-					zap.Error(err),
-					zap.String("brick_design_id", string(brick.DesignID)),
-					zap.String("brick_id", string(elementID)),
-				)
-			}
-
-			// Update brick with final data for sending to client
-			brick.MustApplyCurrency(currency)
-			brick.CalculateTotalPrice()
-		}
-
-		return brick, nil*/
 	}
 
 	// Batch handler: send batch to frontend
 	// Note: This is called from a single collector goroutine, so no mutex needed
 	batchHandler := func(batch []set.BrickSet) error {
-		return h.batchHandlerBricksProgress(ctx, rsID, cpRedisSet, batch, bprogress, DataTypePickabrickBricks)
+		return h.batchHandlerBricksProgress(ctx, rs.ID, cpRedisSet, batch, bprogress, DataTypePickabrickBricks)
 	}
 
 	// Create and run pool with batching
@@ -301,12 +237,21 @@ func (h *Handler) fetchBricks(ctx context.Context, rsID uuid.UUID, setID uuid.UU
 	// However batch may apply a different brickID's which would cause duplicates if not cleared here
 	cpRedisSet.Bricks = []set.BrickSet{}
 
+	// Enable staging mode to build new brick map without clearing the active one
+	// This prevents empty brick map window - clients continue seeing inventory data
+	// while prices are being fetched and built in stagingBricks
+	rs.EnableStagingMode()
+
 	// Process all price jobs
 	if err := pool.Process(cpBricks); err != nil {
-		handleFatalError(h, rsID, setID, set.FetchErrorBatchCache, *cpRedisSet, DataTypeSet, err,
+		handleFatalError(h, rs.ID, setID, set.FetchErrorBatchCache, *cpRedisSet, DataTypeSet, err,
 			"Failed to process prices with worker pool")
 		return err
 	}
+
+	// Atomically promote staging bricks to active bricks
+	// This swaps the maps instantly, avoiding any empty window
+	rs.PromoteStaging()
 
 	zap.L().Debug("Worker pool completed price fetching",
 		zap.Int("bricks_size", bricksSize),
@@ -336,6 +281,9 @@ func (h *Handler) FetchFetchSetIncomplete(
 		zap.Int("bricks_count", len(cacheResult.BricksWoPrices)),
 	)
 
+	// Push set manually (to avoid pulling from cache which does not have preprocessed set data)
+	h.PushChangeSet(rs.ID, setID, DataTypeSet, DataTypeCreated, cacheResult.Set)
+
 	// Check if set price is outdated
 	if cacheResult.SetWoPrice {
 		ok, err := set.FetchLegoProductDetails(ctx, setID, &cacheResult.Set.Set, locale, currency, true)
@@ -343,8 +291,10 @@ func (h *Handler) FetchFetchSetIncomplete(
 			handleFatalError(h, rs.ID, setID, set.FetchErrorDetailsCache, cacheResult.Set.Set, DataTypeSet, err,
 				"Failed to update Redis set inventory")
 		} else if ok {
-			// TODO : doing so might might cause the client to loose precalculated data such as total price etc.
-			h.PushChange(rs.ID, setID, DataTypeSet, DataTypeUpdated)
+			// Push set manually
+			// Otherwise default behavior pulls from cache which only holds a set.Set and not set.SetExternal
+			// Especially since the current runtime is for an incomplete set which could already have partial final data calculated
+			h.PushChangeSet(rs.ID, setID, DataTypeSet, DataTypeUpdated, cacheResult.Set)
 		}
 	}
 
@@ -368,90 +318,13 @@ func (h *Handler) FetchFetchSetIncomplete(
 
 	// Worker function: fetch for a single brick
 	workerFunc := func(ctx context.Context, brick set.BrickSet) (set.BrickSet, error) {
-		// TODO : clean up
 		return h.workerHandlerBrickPrice(ctx, setID, brick, locale, currency)
-		/*// Try to find the best brick ID
-		brickID, err := brick.GetBrickIDForRedis()
-		if err != nil {
-			// Should not happen as these bricks were previously cached
-			h.logWarning(setID, "Brick.GetBrickIDForRedis", err)
-			zap.L().Warn("Failed to get brick ID for redis",
-				zap.Error(err),
-			)
-			brick.MustApplyCurrency(currency) // Best effort
-			return brick, nil
-		}
-
-		// Fetch brick with price for the requested currency
-		matchingBricks, err := pickabrick.C().FetchBricksByBrickID(string(brickID), locale, currency)
-		if err != nil {
-			// Failed to fetch - log and continue
-			h.logWarning(setID, "Pickabrick.FetchBricksByBrickID", err)
-			zap.L().Warn("Failed to fetch brick for currency",
-				zap.Error(err),
-				zap.String("brick_id", string(brickID)),
-				zap.String("design_id", string(brick.DesignID)),
-				zap.String("currency", currency.String()),
-			)
-			brick.MustApplyCurrency(currency) // Best effort
-			return brick, nil
-		}
-
-		// Find matching brick and update price - there should be only one matching brick per ID, but we loop just in case
-		priceUpdated := false
-		for _, mb := range matchingBricks {
-			if set.BrickID(mb.ID) == brickID {
-
-				// Update brick with fetched data from pickabrick
-				brick.Brick = set.MapBrickFromPickabrick(brick.Brick, brickID, mb, locale, currency)
-
-				// Update brick in cache
-				if err = set.SetRedisBrick(ctx, brick.Brick, true); err != nil {
-					h.logWarning(setID, "Redis.SetRedisBrick", err)
-					zap.L().Warn("Failed to update brick price in cache",
-						zap.Error(err),
-						zap.String("brick_id", string(brickID)),
-					)
-				}
-
-				// Update brick with final data for sending to client
-				brick.MustApplyCurrency(currency)
-				brick.CalculateTotalPrice()
-
-				// Mark as updated for final
-				priceUpdated = true
-				break
-			}
-		}
-
-		if !priceUpdated {
-			// Brick not found in API response - might be discontinued, apply as best effort
-			brick.MustApplyCurrency(currency)
-		}
-
-		return brick, nil*/
 	}
 
 	// Batch handler: send batch to frontend
 	// Note: This is called from a single collector goroutine, so no mutex needed
 	batchHandler := func(batch []set.BrickSet) error {
-		// TODO : clean up
 		return h.batchHandlerBricksProgress(ctx, rs.ID, &cacheResult.Set.Set, batch, bprogress, DataTypePickabrickBricks)
-		/*// Add all updated bricks to progress
-		for _, brick := range batch {
-			bprogress.AddItem(brick)
-		}
-
-		// Prepare for sending
-		bprogress.PrepareForSend()
-
-		// Send batch to frontend
-		h.PushBatchProgress(rs.ID, DataTypePickabrickBricks, *bprogress)
-
-		// Complete batch (resets items array for next batch)
-		bprogress.CompleteBatch()
-
-		return nil*/
 	}
 
 	// Create and run pool with batching
@@ -465,7 +338,10 @@ func (h *Handler) FetchFetchSetIncomplete(
 		)
 	})
 
-	// We can work freely with the set data in cacheResult.Set since it only had valid bricks up until now.
+	// Clear bricks to avoid duplication in batch handler
+	// Initial slice was filled with inventory data, along with specified brickID's
+	// However batch may apply a different brickID's which would cause duplicates if not cleared here
+	cacheResult.Set.Bricks = []set.BrickSet{}
 
 	// Process all brick price jobs
 	if err := pool.Process(cacheResult.BricksWoPrices); err != nil {
@@ -477,7 +353,21 @@ func (h *Handler) FetchFetchSetIncomplete(
 		return
 	}
 
-	// Mark as completed
+	// Use runtime bricks and update the set's bricks before broadcasting
+	cacheResult.Set.Bricks = utils.MapValues(rs.bricks)
+
+	// Clean up
+	cacheResult.Set.CleanupForCache()
+
+	// Mark set fetch completed
+	cacheResult.Set.FetchStatus = set.FetchStatusCompleted
+	err := set.SetRedisSet(ctx, cacheResult.Set.Set, true)
+	if err != nil {
+		// Failed to cache the final version => FATAL
+		handleFatalError(h, rs.ID, setID, set.FetchErrorFinalCache, cacheResult.Set.Set, DataTypeSet, err,
+			"Failed to update Redis set with final data")
+		return
+	}
 	h.PushChange(rs.ID, setID, DataTypeSet, DataTypeCompleted)
 
 	zap.L().Info("Price fetch completed",
@@ -515,7 +405,7 @@ func (h *Handler) workerHandlerBrickPrice(
 		}
 
 		// TODO: diff between fetch error and no price found for the brick in the requested currency
-		// TODO: if price not found, add a flag to the brick price currency to avoid re-tries for a certain amount of time
+		// if price not found, add a flag to the brick price currency to avoid re-tries for a certain amount of time
 
 		// Fetch for elementID
 		results, err := pickabrick.C().FetchBricksByBrickID(string(elementID), locale, currency)
@@ -544,6 +434,23 @@ func (h *Handler) workerHandlerBrickPrice(
 
 				// Found a new valid and lower price, update brick with fetched data from pickabrick
 				brick.Brick = mappedB
+
+				// Cleanup brick data for caching
+				copyPrice, copyTotalPrice := brick.CleanupForCache()
+
+				// Cache the updated brick with new price data
+				if cacheErr := set.SetRedisBrick(ctx, brick.Brick, true); cacheErr != nil {
+					h.logWarning(setID, "Redis.SetRedisBrick", cacheErr)
+					zap.L().Warn("Failed to cache brick with new price",
+						zap.Error(cacheErr),
+						zap.String("brick_design_id", string(brick.DesignID)),
+						zap.String("set_id", setID.String()),
+					)
+					// Not fatal, continue without caching
+				}
+
+				// Restore the original price data after caching
+				brick.RestoreAfterCache(copyPrice, copyTotalPrice)
 
 				// Update brick with final data for sending to client
 				brick.MustApplyCurrency(currency)

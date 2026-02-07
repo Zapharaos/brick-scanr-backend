@@ -299,7 +299,6 @@ func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request
 	render.Accepted(w, r, set.DetailsResponse{
 		Completed:   false,
 		WebsocketID: rs.ID.String(),
-		Set:         cacheResult.Set,
 	})
 }
 

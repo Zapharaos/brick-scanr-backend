@@ -169,3 +169,11 @@ func (s *Set) CalculateBricksTotalPrices() (int, int) {
 
 	return sumTotalPriceCentAmount, countMissingBrickPrices
 }
+
+// CleanupForCache performs cleanup on the Set before caching
+func (s *Set) CleanupForCache() {
+	for i := range s.Bricks {
+		// ensure we call the pointer receiver on an addressable BrickSet
+		_, _ = (&s.Bricks[i]).CleanupForCache()
+	}
+}

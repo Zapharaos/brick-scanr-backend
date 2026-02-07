@@ -53,6 +53,11 @@ type RuntimeSet struct {
 	bricksMutex sync.RWMutex
 	bricks      map[string]set.BrickSet
 
+	// stagingBricks is used during price fetching to build the new brick map without clearing the active one
+	// Once price fetching completes, it atomically replaces bricks to avoid empty windows
+	stagingBricks map[string]set.BrickSet
+	useStaging    bool // When true, AddBricks writes to stagingBricks instead of bricks
+
 	*clientHolder
 	register   chan Client
 	unregister chan uuid.UUID
@@ -69,19 +74,21 @@ type RuntimeSet struct {
 // NewRuntimeSet creates a new runtime set
 func NewRuntimeSet(s set.SetExternal, key RuntimeSetKey, opt RuntimeOptions, wg *sync.WaitGroup, errorLogger *supervisor.AsyncErrorLogger) *RuntimeSet {
 	rs := &RuntimeSet{
-		ID:           uuid.New(),
-		key:          key,
-		set:          s,
-		errorLogger:  errorLogger,
-		opt:          opt,
-		clientHolder: newClientHolder(true),
-		register:     make(chan Client, opt.ClientChanCap),
-		unregister:   make(chan uuid.UUID, opt.ClientChanCap),
-		changeChan:   make(chan dataChange, opt.ChangeChanCap),
-		bricks:       make(map[string]set.BrickSet),
-		bricksMutex:  sync.RWMutex{},
-		done:         make(chan struct{}),
-		wg:           wg,
+		ID:            uuid.New(),
+		key:           key,
+		set:           s,
+		errorLogger:   errorLogger,
+		opt:           opt,
+		clientHolder:  newClientHolder(true),
+		register:      make(chan Client, opt.ClientChanCap),
+		unregister:    make(chan uuid.UUID, opt.ClientChanCap),
+		changeChan:    make(chan dataChange, opt.ChangeChanCap),
+		bricks:        make(map[string]set.BrickSet),
+		stagingBricks: make(map[string]set.BrickSet),
+		useStaging:    false,
+		bricksMutex:   sync.RWMutex{},
+		done:          make(chan struct{}),
+		wg:            wg,
 	}
 
 	return rs
@@ -172,6 +179,12 @@ func (rs *RuntimeSet) AddBricks(bricks []set.BrickSet) {
 	rs.bricksMutex.Lock()
 	defer rs.bricksMutex.Unlock()
 
+	// Determine which map to write to
+	targetMap := rs.bricks
+	if rs.useStaging {
+		targetMap = rs.stagingBricks
+	}
+
 	for _, brick := range bricks {
 		// Create unique key for brick
 		key := rs.getBrickMapItemKey(brick.Brick)
@@ -179,13 +192,13 @@ func (rs *RuntimeSet) AddBricks(bricks []set.BrickSet) {
 			return
 		}
 
-		_, exists := rs.bricks[key]
+		_, exists := targetMap[key]
 		if exists {
 			// Update existing brick if needed (e.g., quantity, price)
-			rs.bricks[key] = brick
+			targetMap[key] = brick
 		} else {
-			// Add or update the brick
-			rs.bricks[key] = brick
+			// Add new brick
+			targetMap[key] = brick
 		}
 	}
 }
@@ -206,6 +219,25 @@ func (rs *RuntimeSet) GetAllBricks() []set.BrickSet {
 	})
 
 	return bricks
+}
+
+// EnableStagingMode enables staging mode where AddBricks writes to stagingBricks instead of bricks
+// This allows building a new brick map without affecting clients reading from the active map
+func (rs *RuntimeSet) EnableStagingMode() {
+	rs.bricksMutex.Lock()
+	defer rs.bricksMutex.Unlock()
+	rs.useStaging = true
+	rs.stagingBricks = make(map[string]set.BrickSet)
+}
+
+// PromoteStaging atomically replaces the active bricks map with stagingBricks
+// This avoids having an empty brick map window when transitioning between phases
+func (rs *RuntimeSet) PromoteStaging() {
+	rs.bricksMutex.Lock()
+	defer rs.bricksMutex.Unlock()
+	rs.bricks = rs.stagingBricks
+	rs.stagingBricks = make(map[string]set.BrickSet)
+	rs.useStaging = false
 }
 
 // ClearBricks clear the Bricks slice
@@ -346,13 +378,11 @@ func (rs *RuntimeSet) handleClientConnect(client Client) {
 
 	// Update rs.set.Bricks with all Bricks stored in the runtime
 	// This ensures PacketInit contains all Bricks fetched so far
-	rs.UpdateSetBricks(rs.GetAllBricks())
-	// TODO: when someone connects, we just want to send the latest data, but no need to risk updating the whole runtime set for this
+	s := rs.GetSet()
+	s.Bricks = rs.GetAllBricks()
 
 	// Send initial packet with set info and all Bricks
-	client.SendPacket(NewPacketInit(
-		rs.GetSet(),
-	))
+	client.SendPacket(NewPacketInit(s))
 }
 
 // handleClientDisconnect handles a client disconnect
