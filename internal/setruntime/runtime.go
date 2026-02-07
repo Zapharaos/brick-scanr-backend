@@ -16,15 +16,15 @@ import (
 type OperationType string
 
 const (
-	OpTypeFull   OperationType = "full"
-	OpTypePrices OperationType = "prices"
+	OpTypeFull       OperationType = "full"
+	OpTypeIncomplete OperationType = "incomplete"
 )
 
 // RuntimeSetKey uniquely identifies a runtime set operation
 type RuntimeSetKey struct {
 	SetID    uuid.UUID
 	Currency language.Tag
-	OpType   OperationType // "full" or "prices"
+	OpType   OperationType
 }
 
 func NewRuntimeSetKey(setID uuid.UUID, currency language.Tag, opType OperationType) RuntimeSetKey {
@@ -46,12 +46,12 @@ type RuntimeSet struct {
 
 	// setMutex protects concurrent access to the set field
 	setMutex sync.RWMutex
-	set      set.Set
+	set      set.SetExternal
 
 	// bricks stores all bricks processed during this runtime (by BrickID+DesignID)
 	// This allows new clients to receive all bricks when joining an ongoing fetch
 	bricksMutex sync.RWMutex
-	bricks      map[string]set.Brick
+	bricks      map[string]set.BrickSet
 
 	*clientHolder
 	register   chan Client
@@ -67,7 +67,7 @@ type RuntimeSet struct {
 }
 
 // NewRuntimeSet creates a new runtime set
-func NewRuntimeSet(s set.Set, key RuntimeSetKey, opt RuntimeOptions, wg *sync.WaitGroup, errorLogger *supervisor.AsyncErrorLogger) *RuntimeSet {
+func NewRuntimeSet(s set.SetExternal, key RuntimeSetKey, opt RuntimeOptions, wg *sync.WaitGroup, errorLogger *supervisor.AsyncErrorLogger) *RuntimeSet {
 	rs := &RuntimeSet{
 		ID:           uuid.New(),
 		key:          key,
@@ -78,7 +78,7 @@ func NewRuntimeSet(s set.Set, key RuntimeSetKey, opt RuntimeOptions, wg *sync.Wa
 		register:     make(chan Client, opt.ClientChanCap),
 		unregister:   make(chan uuid.UUID, opt.ClientChanCap),
 		changeChan:   make(chan dataChange, opt.ChangeChanCap),
-		bricks:       make(map[string]set.Brick),
+		bricks:       make(map[string]set.BrickSet),
 		bricksMutex:  sync.RWMutex{},
 		done:         make(chan struct{}),
 		wg:           wg,
@@ -119,105 +119,16 @@ func (rs *RuntimeSet) HasClient(id uuid.UUID) bool {
 	return ok
 }
 
-// ClearBricks clear the Bricks slice
-func (rs *RuntimeSet) ClearBricks() {
-	rs.bricksMutex.Lock()
-	defer rs.bricksMutex.Unlock()
-	rs.bricks = make(map[string]set.Brick)
-}
-
-// UpdateBricks updates the Bricks slice in rs.set.Bricks
-func (rs *RuntimeSet) UpdateBricks(bricks []set.Brick) {
-	rs.setMutex.Lock()
-	rs.bricksMutex.Lock()
-	defer func() {
-		rs.setMutex.Unlock()
-		rs.bricksMutex.Unlock()
-	}()
-	rs.set.Bricks = bricks
-}
-
-// AddBrick adds or updates a brick in the runtime set
-func (rs *RuntimeSet) AddBrick(brick set.Brick) {
-	rs.bricksMutex.Lock()
-	defer rs.bricksMutex.Unlock()
-
-	// Create unique key from BrickID and DesignID
-	brickID, err := brick.GetBrickIDForRedis()
-	if err != nil {
-		rs.logWarning("RuntimeSet.AddBrick", err)
-		zap.L().Warn("Failed to get brick ID for runtime storage",
-			zap.Error(err),
-			zap.String("design_id", string(brick.DesignID)),
-		)
-		return
-	}
-	key := string(brickID) + ":" + string(brick.DesignID)
-
-	// Add or update the brick
-	rs.bricks[key] = brick
-}
-
-// AddBricks adds or updates multiple Bricks in the runtime set
-func (rs *RuntimeSet) AddBricks(bricks []set.Brick) {
-	rs.bricksMutex.Lock()
-	defer rs.bricksMutex.Unlock()
-
-	dup := make(map[string]set.Brick)
-
-	count := 0
-	for _, brick := range bricks {
-		// Create unique key from BrickID and DesignID
-		brickID, err := brick.GetBrickIDForRedis()
-		if err != nil {
-			rs.logWarning("RuntimeSet.AddBricks", err)
-			zap.L().Warn("Failed to get brick ID for runtime storage",
-				zap.Error(err),
-				zap.String("design_id", string(brick.DesignID)),
-			)
-			continue
-		}
-		key := string(brick.DesignID) + ":" + string(brickID)
-
-		_, exists := rs.bricks[key]
-		if exists {
-			// Update existing brick if needed (e.g., quantity, price)
-			rs.bricks[key] = brick
-			dup[key] = brick
-			count++
-		} else {
-			// Add or update the brick
-			rs.bricks[key] = brick
-		}
-	}
-
-	debug := count
-	debug++
-}
-
-// GetAllBricks returns all Bricks currently stored in the runtime, sorted by index
-func (rs *RuntimeSet) GetAllBricks() []set.Brick {
-	rs.bricksMutex.RLock()
-	defer rs.bricksMutex.RUnlock()
-
-	bricks := make([]set.Brick, 0, len(rs.bricks))
-	for _, brick := range rs.bricks {
-		bricks = append(bricks, brick)
-	}
-
-	// Sort Bricks by index to maintain original order from the set
-	sort.Slice(bricks, func(i, j int) bool {
-		return bricks[i].Index < bricks[j].Index
-	})
-
-	return bricks
-}
-
 // GetSet returns a shallow copy of the set for safe reading
-func (rs *RuntimeSet) GetSet() set.Set {
+func (rs *RuntimeSet) GetSet() set.SetExternal {
 	rs.setMutex.RLock()
 	defer rs.setMutex.RUnlock()
 	return rs.set
+}
+
+// GetSetID returns the set ID (immutable, no lock needed)
+func (rs *RuntimeSet) GetSetID() uuid.UUID {
+	return rs.set.Id
 }
 
 // GetFetchStatus returns the current fetch status
@@ -234,23 +145,74 @@ func (rs *RuntimeSet) GetFetchError() *set.FetchError {
 	return rs.set.FetchError
 }
 
-// UpdateFetchStatus updates the fetch status
-func (rs *RuntimeSet) UpdateFetchStatus(status set.FetchStatus) {
+// UpdateSetBricks updates the Bricks slice in rs.set.Bricks
+func (rs *RuntimeSet) UpdateSetBricks(bricks []set.BrickSet) {
 	rs.setMutex.Lock()
 	defer rs.setMutex.Unlock()
-	rs.set.FetchStatus = status
+	rs.set.Bricks = bricks
 }
 
-// SetFetchError sets the fetch error
-func (rs *RuntimeSet) SetFetchError(err *set.FetchError) {
-	rs.setMutex.Lock()
-	defer rs.setMutex.Unlock()
-	rs.set.FetchError = err
+// getBrickMapItemKey generates a unique key for a brick based on its BrickID and DesignID
+func (rs *RuntimeSet) getBrickMapItemKey(brick set.Brick) string {
+	// Create unique key from BrickID and DesignID
+	brickID, err := brick.GetBrickIDForRedis()
+	if err != nil {
+		rs.logWarning("RuntimeSet.AddBrick", err)
+		zap.L().Warn("Failed to get brick ID for runtime storage",
+			zap.Error(err),
+			zap.String("design_id", string(brick.DesignID)),
+		)
+		return ""
+	}
+	return string(brickID) + ":" + string(brick.DesignID)
 }
 
-// GetSetID returns the set ID (immutable, no lock needed)
-func (rs *RuntimeSet) GetSetID() uuid.UUID {
-	return rs.set.Id
+// AddBricks adds or updates multiple Bricks in the runtime set
+func (rs *RuntimeSet) AddBricks(bricks []set.BrickSet) {
+	rs.bricksMutex.Lock()
+	defer rs.bricksMutex.Unlock()
+
+	for _, brick := range bricks {
+		// Create unique key for brick
+		key := rs.getBrickMapItemKey(brick.Brick)
+		if key == "" {
+			return
+		}
+
+		_, exists := rs.bricks[key]
+		if exists {
+			// Update existing brick if needed (e.g., quantity, price)
+			rs.bricks[key] = brick
+		} else {
+			// Add or update the brick
+			rs.bricks[key] = brick
+		}
+	}
+}
+
+// GetAllBricks returns all Bricks currently stored in the runtime, sorted by index
+func (rs *RuntimeSet) GetAllBricks() []set.BrickSet {
+	rs.bricksMutex.RLock()
+	defer rs.bricksMutex.RUnlock()
+
+	bricks := make([]set.BrickSet, 0, len(rs.bricks))
+	for _, brick := range rs.bricks {
+		bricks = append(bricks, brick)
+	}
+
+	// Sort Bricks by index to maintain original order from the set
+	sort.Slice(bricks, func(i, j int) bool {
+		return bricks[i].Index < bricks[j].Index
+	})
+
+	return bricks
+}
+
+// ClearBricks clear the Bricks slice
+func (rs *RuntimeSet) ClearBricks() {
+	rs.bricksMutex.Lock()
+	defer rs.bricksMutex.Unlock()
+	rs.bricks = make(map[string]set.BrickSet)
 }
 
 // logWarning logs a warning-level error to the async error logger
@@ -384,7 +346,8 @@ func (rs *RuntimeSet) handleClientConnect(client Client) {
 
 	// Update rs.set.Bricks with all Bricks stored in the runtime
 	// This ensures PacketInit contains all Bricks fetched so far
-	rs.UpdateBricks(rs.GetAllBricks())
+	rs.UpdateSetBricks(rs.GetAllBricks())
+	// TODO: when someone connects, we just want to send the latest data, but no need to risk updating the whole runtime set for this
 
 	// Send initial packet with set info and all Bricks
 	client.SendPacket(NewPacketInit(

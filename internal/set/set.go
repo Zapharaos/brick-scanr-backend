@@ -37,36 +37,46 @@ type FetchError struct {
 	Step    FetchErrorStep `json:"step"`
 }
 
+// Set represents a Lego set. Allowed to be cached
 type Set struct {
-	FetchStatus     FetchStatus `json:"fetch_status"`
-	FetchError      *FetchError `json:"fetch_error,omitempty"`
-	Id              uuid.UUID   `json:"id"`
-	LegoURL         string      `json:"lego_url"`
-	Slug            string      `json:"slug"`
-	Name            string      `json:"name"`
-	Number          string      `json:"number"`
-	ImageURL        string      `json:"image_url"`
-	YearReleased    int         `json:"year_released"`
-	Status          Status      `json:"status"`
-	Price           Price       `json:"price"`
-	Prices          PricePerCurrencies
-	TotalPrice      Price   `json:"total_price"`
-	InstructionsURL string  `json:"instructions_url"`
-	Parts           int     `json:"parts"`
-	MissingParts    int     `json:"missing_parts"`
-	Bricks          []Brick `json:"bricks"`
-	BricklinkID     int     `json:"bricklink_id"`
-	BricklinkNumber string  `json:"bricklink_number"`
+	// Fetching status and error
+	FetchStatus FetchStatus `json:"fetch_status"`
+	FetchError  *FetchError `json:"fetch_error,omitempty"`
+
+	// Local data
+	Id uuid.UUID `json:"id"`
+
+	// General data
+	Number string             `json:"number"`
+	Slug   string             `json:"slug"`
+	Prices PricePerCurrencies `json:"prices"`
+
+	// Could be made locale specific, but not for now
+	Status          Status `json:"status"`
+	Name            string `json:"name"`
+	LegoURL         string `json:"lego_url"`
+	InstructionsURL string `json:"instructions_url"`
+
+	// Details from Bricklink
+	Bricks          []BrickSet `json:"bricks"`
+	Parts           int        `json:"parts"`
+	ImageURL        string     `json:"image_url"`
+	YearReleased    int        `json:"year_released"`
+	BricklinkID     int        `json:"bricklink_id"`
+	BricklinkNumber string     `json:"bricklink_number"`
 }
 
+// BuildLegoURL constructs the LEGO product URL based on the set's slug and the provided locale
 func (s *Set) BuildLegoURL(locale language.Tag) {
 	s.LegoURL = "https://www.lego.com/" + locale.String() + "/product/" + s.Slug
 }
 
+// BuildInstructionsURL constructs the LEGO building instructions URL based on the set's number and the provided locale
 func (s *Set) BuildInstructionsURL(locale language.Tag) {
 	s.InstructionsURL = "https://www.lego.com/" + locale.String() + "/service/building-instructions/" + s.Number
 }
 
+// GenerateSlug creates a URL-friendly slug for the set based on its name and number, with normalization and fallback logic
 func (s *Set) GenerateSlug() {
 	var number string
 
@@ -136,31 +146,26 @@ func MapSetFromBricklinkSearch(bs bricklink.SearchItem) (Set, error) {
 	}, nil
 }
 
-// MustApplyCurrency sets the Set's Price based on the given locale tag if possible, otherwise does nothing
-func (s *Set) MustApplyCurrency(tag language.Tag) {
-	price, ok := s.Prices.GetPrice(tag)
-	if !ok {
-		return
-	}
-	s.Price = *price
-}
+// CalculateBricksTotalPrices calculates and applies the total price for each brick
+// Returns the total sum and how many missing brick prices
+func (s *Set) CalculateBricksTotalPrices() (int, int) {
+	countMissingBrickPrices := 0
+	sumTotalPriceCentAmount := 0
 
-// ApplyTotalPrice calculates the total price based on unit price and parts count
-func (s *Set) ApplyTotalPrice(centAmount int) {
-	s.TotalPrice = Price{
-		CentAmount: centAmount,
-		Currency:   s.Price.Currency,
-		ItemID:     s.Price.ItemID,
-		FetchedAt:  s.Price.FetchedAt,
-	}
-}
+	// Process each brick
+	for _, brick := range s.Bricks {
 
-// DetailsResponse represents the response for a set details request
-type DetailsResponse struct {
-	// WebsocketID is the WebSocket UUID to connect to for updates
-	WebsocketID string `json:"websocket_id"`
-	// Completed indicates if the job is already done
-	Completed bool `json:"completed"`
-	// Set contains the data if already completed, otherwise nil
-	Set Set `json:"set,omitempty"`
+		// Brick reference is missing price
+		if brick.Price.CentAmount == 0 {
+			countMissingBrickPrices++
+			continue
+		}
+
+		// Calculate total price for the brick
+		brick.TotalPrice = brick.Price
+		brick.TotalPrice.CentAmount = brick.Price.CentAmount * brick.Quantity
+		sumTotalPriceCentAmount += brick.TotalPrice.CentAmount
+	}
+
+	return sumTotalPriceCentAmount, countMissingBrickPrices
 }

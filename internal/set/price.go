@@ -27,22 +27,6 @@ type Price struct {
 	FetchedAt  int64  `json:"fetched_at"`
 }
 
-// MapPriceFromPickabrick maps a pickabrick.Price to internal Price representation
-func MapPriceFromPickabrick(price pickabrick.Price) Price {
-	return Price{
-		CentAmount: price.CentAmount,
-		Currency:   price.CurrencyCode,
-	}
-}
-
-// MapPriceFromLego maps a lego.Price to internal Price representation
-func MapPriceFromLego(price lego.Price) Price {
-	return Price{
-		CentAmount: price.CentAmount,
-		Currency:   price.CurrencyCode,
-	}
-}
-
 // IsValid checks if the price is valid
 func (p *Price) IsValid() bool {
 	return p != nil &&
@@ -58,4 +42,26 @@ func (p *Price) IsOutdated(ttl time.Duration) bool {
 // IsLower checks if the price is lower than the provided centAmount
 func (p *Price) IsLower(centAmount int) bool {
 	return p.CentAmount < centAmount
+}
+
+// HasValidPrice checks if the Brick has a valid and up-to-date price for the given locale tag
+func HasValidPrice(prices PricePerCurrencies, tag language.Tag, ttl time.Duration) bool {
+	price, ok := prices.GetPrice(tag)
+	return ok && price.IsValid() && !price.IsOutdated(ttl)
+}
+
+// MapPriceFromPickabrick maps a pickabrick.Price to internal Price representation
+func MapPriceFromPickabrick(price pickabrick.Price) Price {
+	return Price{
+		CentAmount: price.CentAmount,
+		Currency:   price.CurrencyCode,
+	}
+}
+
+// MapPriceFromLego maps a lego.Price to internal Price representation
+func MapPriceFromLego(price lego.Price) Price {
+	return Price{
+		CentAmount: price.CentAmount,
+		Currency:   price.CurrencyCode,
+	}
 }

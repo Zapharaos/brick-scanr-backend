@@ -54,10 +54,10 @@ func (p *packet) ToJSON() ([]byte, error) {
 // PacketInit is a packet to initialize the set
 type PacketInit struct {
 	packet
-	Set set.Set `json:"set"`
+	Set set.SetExternal `json:"set"`
 }
 
-func NewPacketInit(set set.Set) *PacketInit {
+func NewPacketInit(set set.SetExternal) *PacketInit {
 	return &PacketInit{
 		packet: packet{
 			Type: PacketTypeInit,
@@ -99,13 +99,13 @@ func (p *PacketFatal) ToJSON() ([]byte, error) {
 
 type PacketSet struct {
 	packet
-	Set set.Set `json:"set"`
+	Set set.SetExternal `json:"set"`
 }
 
 // NewPacketSet creates a new PacketSet
-func NewPacketSet(s set.Set, bricks bool) *PacketSet {
+func NewPacketSet(s set.SetExternal, bricks bool) *PacketSet {
 	if !bricks {
-		s.Bricks = []set.Brick{}
+		s.Bricks = []set.BrickSet{}
 	}
 	return &PacketSet{
 		packet: packet{
@@ -123,13 +123,13 @@ func (p *PacketSet) ToJSON() ([]byte, error) {
 // PacketInventoryBatch is a packet to send a batch of Bricks
 type PacketInventoryBatch struct {
 	packet
-	Bricks         []set.Brick `json:"bricks"`
-	BricksProgress *Progress   `json:"bricksProgress"`
-	Status         BatchStatus `json:"status"`
+	Bricks         []set.BrickSet `json:"bricks"`
+	BricksProgress *Progress      `json:"bricksProgress"`
+	Status         BatchStatus    `json:"status"`
 }
 
 // NewPacketInventoryBatch creates a new PacketInventoryBatch
-func NewPacketInventoryBatch(bricks []set.Brick, progress *Progress, status BatchStatus) *PacketInventoryBatch {
+func NewPacketInventoryBatch(bricks []set.BrickSet, progress *Progress, status BatchStatus) *PacketInventoryBatch {
 	return &PacketInventoryBatch{
 		packet: packet{
 			Type: PacketTypeInventoryBatch,

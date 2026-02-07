@@ -79,7 +79,11 @@ func FetchLegoProductDetails(ctx context.Context, setID uuid.UUID, set *Set, loc
 			set.Prices = make(map[language.Tag]*Price)
 		}
 		set.Prices[currency] = &lp
-		set.MustApplyCurrency(currency)
+		zap.L().Warn("LEGO product price fetched",
+			zap.String("set_number", set.Number),
+			zap.String("set_id", setID.String()),
+			zap.String("currency", currency.String()),
+			zap.Int("price", lp.CentAmount))
 
 		// Update in cache
 		err = SetRedisSet(ctx, *set, true)

@@ -30,14 +30,14 @@ type dataChange struct {
 	Id       uuid.UUID
 	Type     DataType
 	Reason   DataChangeReason
-	Progress Progress // Used when working with batches
+	Progress Progress // Only used when working with batches
 }
 
 // handleDataChangeCreated handles the creation of data
 func (rs *RuntimeSet) handleDataChangeCreated(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
-		rs.refreshSet(change.Id)
+		rs.pullSetFromCache(change.Id)
 		rs.broadcastPacket(NewPacketSet(rs.GetSet(), false))
 		break
 	default:
@@ -49,7 +49,7 @@ func (rs *RuntimeSet) handleDataChangeCreated(change dataChange) {
 func (rs *RuntimeSet) handleDataChangeUpdated(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
-		rs.refreshSet(change.Id)
+		rs.pullSetFromCache(change.Id)
 		rs.broadcastPacket(NewPacketSet(rs.GetSet(), false))
 		break
 	default:
@@ -61,7 +61,7 @@ func (rs *RuntimeSet) handleDataChangeUpdated(change dataChange) {
 func (rs *RuntimeSet) handleDataChangeCompleted(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
-		rs.refreshSet(change.Id)
+		rs.pullSetFromCache(change.Id)
 		rs.calculateFinalData()
 		rs.broadcastPacket(NewPacketSet(rs.GetSet(), true))
 		break
@@ -73,7 +73,7 @@ func (rs *RuntimeSet) handleDataChangeCompleted(change dataChange) {
 // handleDataChangeFailed handles the data failure
 func (rs *RuntimeSet) handleDataChangeFailed(change dataChange) {
 	// Refresh set from cache to get the latest error details
-	rs.refreshSet(change.Id)
+	rs.pullSetFromCache(change.Id)
 
 	// Determine the fatal error code and message based on the data type
 	var fatalPacket *PacketFatal
@@ -96,9 +96,9 @@ func (rs *RuntimeSet) handleDataChangeProgress(change dataChange) {
 	switch change.Type {
 	case DataTypeBricklinkBricks, DataTypePickabrickBricks:
 		// Convert Items ([]any) to []set.Brick
-		bricks := make([]set.Brick, 0, len(change.Progress.Items))
+		bricks := make([]set.BrickSet, 0, len(change.Progress.Items))
 		for _, item := range change.Progress.Items {
-			if brick, ok := item.(set.Brick); ok {
+			if brick, ok := item.(set.BrickSet); ok {
 				bricks = append(bricks, brick)
 			}
 		}
@@ -124,8 +124,8 @@ func (rs *RuntimeSet) handleDataChangeProgress(change dataChange) {
 	}
 }
 
-// refreshSet refreshes the set data from Redis into the runtime set instance
-func (rs *RuntimeSet) refreshSet(setId uuid.UUID) {
+// pullSetFromCache refreshes the set data from Redis into the runtime set instance
+func (rs *RuntimeSet) pullSetFromCache(setId uuid.UUID) {
 	cachedSet, err := set.GetRedisSet(context.Background(), setId)
 	if err != nil {
 		rs.logWarning("RuntimeSet.RefreshSet", err)
@@ -134,35 +134,30 @@ func (rs *RuntimeSet) refreshSet(setId uuid.UUID) {
 
 	// Update the entire set atomically
 	rs.setMutex.Lock()
-	rs.set = cachedSet
+	rs.set.Set = cachedSet
 	rs.setMutex.Unlock()
 }
 
 // calculateFinalData calculates and updates the final data for the runtime set
 func (rs *RuntimeSet) calculateFinalData() {
-	countMissingPrices := 0
-	sumTotalPriceCentAmount := 0
-
-	// Process each brick
-	for _, brick := range rs.bricks {
-
-		// Brick reference is missing price
-		if brick.Price.CentAmount == 0 {
-			countMissingPrices++
-			continue
-		}
-
-		// Calculate total price for the brick
-		brick.TotalPrice = brick.Price
-		brick.TotalPrice.CentAmount = brick.Price.CentAmount * brick.Quantity
-		sumTotalPriceCentAmount += brick.TotalPrice.CentAmount
-	}
 
 	// Use runtime bricks and update the set's bricks before broadcasting
 	rs.set.Bricks = utils.MapValues(rs.bricks)
 
+	// Calculate total prices for bricks and count how many are missing prices
+	countMissingBrickPrices, sumTotalPriceCentAmount := rs.set.CalculateBricksTotalPrices()
+
+	// Determine the currency symbol to use for the total price
+	var currencySymbol string
+	price, ok := rs.set.Prices.GetPrice(rs.key.Currency)
+	if ok && price != nil {
+		currencySymbol = price.Currency
+	} else {
+		// Default - should not happen as price should have been fetched before
+		currencySymbol = rs.key.Currency.String()
+	}
+
 	// Update final data
-	rs.set.MissingParts = countMissingPrices
-	rs.set.TotalPrice = rs.set.Price
-	rs.set.TotalPrice.CentAmount = sumTotalPriceCentAmount
+	rs.set.MissingParts = countMissingBrickPrices
+	rs.set.ApplyTotalPrice(sumTotalPriceCentAmount, currencySymbol)
 }
