@@ -2,6 +2,7 @@ package setruntime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -385,31 +386,98 @@ func (h *Handler) workerHandlerBrickPrice(
 ) (set.BrickSet, error) {
 
 	// Try to find the best brick ID
+	// Track which IDs we've tried and their results for final not-found caching
+	var firstNotFoundID *set.BrickID
+	foundValidPrice := false
+
 	for _, elementID := range brick.IDs {
 
-		// Check cache first and has valid item price for the currency
-		if cacheBrick, err := set.GetRedisBrick(ctx, elementID); err == nil &&
-			set.HasValidPrice(cacheBrick.Prices, currency, database.DB().Redis().TTLS.BrickPrice) {
+		// Check cache first for this specific brick ID
+		if cacheBrick, err := set.GetRedisBrick(ctx, elementID); err == nil {
+			// Check if this brick ID has a valid price for the currency
+			if set.HasValidPrice(cacheBrick.Prices, currency, database.DB().Redis().TTLS.BrickPrice) {
+				// Check if current brick already has a valid lower price
+				if brick.Brick.HasLowerPrice(cacheBrick, currency) {
+					continue
+				}
 
-			// Check if current price currency is already set, valid and lower
-			if brick.Brick.HasLowerPrice(cacheBrick, currency) {
+				// Found valid cached price for this brick ID
+				brick.Brick = cacheBrick
+				brick.MustApplyCurrency(currency)
+				brick.CalculateTotalPrice()
+				foundValidPrice = true
 				continue
 			}
 
-			// Update brick with cached data from pickabrick and apply final currency data
-			brick.Brick = cacheBrick
-			brick.MustApplyCurrency(currency)
-			brick.CalculateTotalPrice()
-
-			continue
+			// Check if this brick ID has a valid cached not-found entry
+			if set.HasCachedNotFound(cacheBrick.Prices, currency, database.DB().Redis().TTLS.BrickPrice) {
+				zap.L().Debug("Brick ID has cached not-found price, trying next ID",
+					zap.String("elementID", string(elementID)),
+					zap.String("currency", currency.String()),
+					zap.String("design_id", string(brick.DesignID)),
+				)
+				// Remember this ID as not found, but keep trying other IDs
+				if firstNotFoundID == nil {
+					idCopy := elementID
+					firstNotFoundID = &idCopy
+				}
+				continue
+			}
 		}
 
-		// TODO: diff between fetch error and no price found for the brick in the requested currency
-		// if price not found, add a flag to the brick price currency to avoid re-tries for a certain amount of time
-
-		// Fetch for elementID
+		// No valid cache entry for this brick ID - fetch from API
 		results, err := pickabrick.C().FetchBricksByBrickID(string(elementID), locale, currency)
 		if err != nil {
+			// Check if it's a not-found error
+			if errors.Is(err, pickabrick.ErrBrickNotFound) {
+				zap.L().Debug("Brick ID not found in pick-a-brick API",
+					zap.String("elementID", string(elementID)),
+					zap.String("currency", currency.String()),
+					zap.String("design_id", string(brick.DesignID)),
+				)
+
+				// Create a completely independent brick for caching not-found status
+				// We must not modify the original brick that will be used in the set
+				notFoundBrick := set.Brick{
+					MainID:   &elementID,
+					IDs:      brick.IDs,
+					DesignID: brick.DesignID,
+					IsCustom: brick.IsCustom,
+					Status:   brick.Status,
+					Name:     brick.Name,
+					ImageURL: brick.ImageURL,
+					Color:    brick.Color,
+					Prices:   make(map[language.Tag]*set.Price),
+				}
+
+				// Set only the not-found price for this currency
+				notFoundPrice := set.Price{
+					NotFound:  true,
+					Currency:  currency.String(),
+					ItemID:    string(elementID),
+					FetchedAt: time.Now().UnixMilli(),
+				}
+				notFoundBrick.Prices[currency] = &notFoundPrice
+
+				// Cache this brick ID as not-found (independent entry, won't affect the set's brick)
+				if cacheErr := set.SetRedisBrick(ctx, notFoundBrick, true); cacheErr != nil {
+					h.logWarning(setID, "Redis.SetRedisBrick.NotFound", cacheErr)
+					zap.L().Warn("Failed to cache brick ID with not-found price",
+						zap.Error(cacheErr),
+						zap.String("elementID", string(elementID)),
+						zap.String("design_id", string(brick.DesignID)),
+					)
+				}
+
+				// Remember this ID as not found, but keep trying other IDs
+				if firstNotFoundID == nil {
+					idCopy := elementID
+					firstNotFoundID = &idCopy
+				}
+				continue // Try next ID
+			}
+
+			// Other error - log and try next ID
 			h.logWarning(setID, "Pickabrick.FetchBricksByBrickID", err)
 			zap.L().Warn("Failed to fetch brick by elementID",
 				zap.Error(err),
@@ -455,8 +523,20 @@ func (h *Handler) workerHandlerBrickPrice(
 				// Update brick with final data for sending to client
 				brick.MustApplyCurrency(currency)
 				brick.CalculateTotalPrice()
+				foundValidPrice = true
 			}
 		}
+	}
+
+	// If we didn't find a valid price for any brick ID, but we did encounter not-found entries,
+	// set the MainID to one of the not-found IDs to avoid unnecessary cache lookups next time
+	if !foundValidPrice && firstNotFoundID != nil {
+		brick.Brick.MainID = firstNotFoundID
+		zap.L().Debug("No valid price found for any brick ID, set MainID to first not-found ID",
+			zap.String("main_id", string(*firstNotFoundID)),
+			zap.String("design_id", string(brick.DesignID)),
+			zap.String("currency", currency.String()),
+		)
 	}
 
 	return brick, nil

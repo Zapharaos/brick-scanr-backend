@@ -78,6 +78,10 @@ func (c *Client) FetchProductDetails(slug string, currency language.Tag) (*Produ
 	// Log rate limit headers if present
 	c.throttler.LogRateLimitHeaders(resp)
 
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, ErrProductNotFound
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(bodyBytes))

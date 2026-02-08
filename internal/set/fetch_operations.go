@@ -2,6 +2,7 @@ package set
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
@@ -56,6 +57,33 @@ func FetchLegoProductDetails(ctx context.Context, setID uuid.UUID, set *Set, loc
 	// Fetch product details from LEGO
 	legoProduct, err := lego.C().FetchProductDetails(set.Number, currency)
 	if err != nil {
+		// Check if it's a not-found error
+		if errors.Is(err, lego.ErrProductNotFound) {
+			// Cache the not-found status to avoid repeated API calls
+			notFoundPrice := Price{
+				NotFound:  true,
+				Currency:  currency.String(),
+				FetchedAt: time.Now().UnixMilli(),
+			}
+			if set.Prices == nil {
+				set.Prices = make(map[language.Tag]*Price)
+			}
+			set.Prices[currency] = &notFoundPrice
+
+			// Update in cache
+			err = SetRedisSet(ctx, *set, true)
+			if err != nil {
+				return false, err
+			}
+
+			zap.L().Info("Cached not-found price for LEGO set",
+				zap.String("set_number", set.Number),
+				zap.String("set_id", setID.String()),
+				zap.String("currency", currency.String()),
+			)
+			return false, nil
+		}
+
 		// Non-fatal: LEGO data is supplementary, log warning and continue
 		// This can happen for older or discontinued sets not present in LEGO's API, or for specific locales etc.
 		zap.L().Warn("Failed to fetch product details from LEGO",
@@ -63,35 +91,34 @@ func FetchLegoProductDetails(ctx context.Context, setID uuid.UUID, set *Set, loc
 			zap.String("set_number", set.Number),
 			zap.String("set_id", setID.String()),
 		)
-	} else {
-
-		if !priceOnly {
-			set.Slug = legoProduct.Slug
-			set.BuildLegoURL(locale)
-			set.BuildInstructionsURL(locale)
-			set.Status = MapLegoProductStatus(*legoProduct)
-		}
-
-		// Update set with fetched price
-		lp := MapPriceFromLego(legoProduct.Variant.Price)
-		lp.FetchedAt = time.Now().UnixMilli()
-		if set.Prices == nil {
-			set.Prices = make(map[language.Tag]*Price)
-		}
-		set.Prices[currency] = &lp
-		zap.L().Warn("LEGO product price fetched",
-			zap.String("set_number", set.Number),
-			zap.String("set_id", setID.String()),
-			zap.String("currency", currency.String()),
-			zap.Int("price", lp.CentAmount))
-
-		// Update in cache
-		err = SetRedisSet(ctx, *set, true)
-		if err != nil {
-			return false, err
-		}
-
-		return true, nil
+		return false, nil
 	}
-	return false, nil
+
+	if !priceOnly {
+		set.Slug = legoProduct.Slug
+		set.BuildLegoURL(locale)
+		set.BuildInstructionsURL(locale)
+		set.Status = MapLegoProductStatus(*legoProduct)
+	}
+
+	// Update set with fetched price
+	lp := MapPriceFromLego(legoProduct.Variant.Price)
+	lp.FetchedAt = time.Now().UnixMilli()
+	if set.Prices == nil {
+		set.Prices = make(map[language.Tag]*Price)
+	}
+	set.Prices[currency] = &lp
+	zap.L().Info("LEGO product price fetched",
+		zap.String("set_number", set.Number),
+		zap.String("set_id", setID.String()),
+		zap.String("currency", currency.String()),
+		zap.Int("price", lp.CentAmount))
+
+	// Update in cache
+	err = SetRedisSet(ctx, *set, true)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }

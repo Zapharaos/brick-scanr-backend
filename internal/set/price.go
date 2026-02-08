@@ -25,11 +25,13 @@ type Price struct {
 	Currency   string `json:"currency"`
 	ItemID     string `json:"item_id"`
 	FetchedAt  int64  `json:"fetched_at"`
+	NotFound   bool   `json:"not_found"`
 }
 
 // IsValid checks if the price is valid
 func (p *Price) IsValid() bool {
 	return p != nil &&
+		!p.NotFound &&
 		p.CentAmount > 0 &&
 		p.Currency != ""
 }
@@ -45,9 +47,17 @@ func (p *Price) IsLower(centAmount int) bool {
 }
 
 // HasValidPrice checks if the Brick has a valid and up-to-date price for the given locale tag
+// Returns false if price is not found, outdated, or invalid
 func HasValidPrice(prices PricePerCurrencies, tag language.Tag, ttl time.Duration) bool {
 	price, ok := prices.GetPrice(tag)
 	return ok && price.IsValid() && !price.IsOutdated(ttl)
+}
+
+// HasCachedNotFound checks if the item has a cached "not found" entry for the given currency
+// This helps avoid repeated API calls for items that don't exist
+func HasCachedNotFound(prices PricePerCurrencies, tag language.Tag, ttl time.Duration) bool {
+	price, ok := prices.GetPrice(tag)
+	return ok && price != nil && price.NotFound && !price.IsOutdated(ttl)
 }
 
 // MapPriceFromPickabrick maps a pickabrick.Price to internal Price representation

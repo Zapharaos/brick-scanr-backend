@@ -189,6 +189,14 @@ fragment ElementFacetCategory on ElementCategory {
 		return nil, fmt.Errorf("GraphQL error: %s", graphQLResp.Errors[0].Message)
 	}
 
+	// Check if no bricks were found
+	if len(graphQLResp.Data.Elements) == 0 {
+		zap.L().Debug("No Pick-a-Brick elements found for design ID",
+			zap.String("design_id", designID),
+		)
+		return nil, ErrBrickNotFound
+	}
+
 	zap.L().Debug("Successfully fetched Pick-a-Brick elements",
 		zap.String("design_id", designID),
 		zap.Int("count", len(graphQLResp.Data.Elements)),
@@ -397,6 +405,14 @@ fragment ElementFacetCategory on ElementCategory {
 
 	if len(graphQLResp.Errors) > 0 {
 		return nil, fmt.Errorf("GraphQL error: %s", graphQLResp.Errors[0].Message)
+	}
+
+	// Check if no bricks were found
+	if len(graphQLResp.Data.SearchElements.Results) == 0 {
+		zap.L().Debug("No Pick-a-Brick element found for brick ID",
+			zap.String("brick_id", brickID),
+		)
+		return nil, ErrBrickNotFound
 	}
 
 	zap.L().Debug("Successfully fetched Pick-a-Brick element",

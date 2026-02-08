@@ -1,11 +1,18 @@
 package lego
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/throttle"
 	"github.com/spf13/viper"
+)
+
+// Error types
+var (
+	// ErrProductNotFound indicates that the product was not found in LEGO API
+	ErrProductNotFound = errors.New("product not found in lego api")
 )
 
 // Client handles all LEGO official API interactions

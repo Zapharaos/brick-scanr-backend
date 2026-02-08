@@ -146,8 +146,20 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 
 	// Check if set price for requested currency is available
 	setPriceMissing := false
-	if price, ok := cachedSet.Prices.GetPrice(currency); !ok || price.IsOutdated(database.DB().Redis().TTLS.SetPrice) {
+	if price, ok := cachedSet.Prices.GetPrice(currency); !ok {
+		// No price entry at all
 		setPriceMissing = true
+	} else if price.IsOutdated(database.DB().Redis().TTLS.SetPrice) {
+		// Price exists but is outdated
+		setPriceMissing = true
+	} else if price.NotFound {
+		// Price has not-found flag and is still fresh - don't try to refetch
+		// Set will be returned without a price, which is expected for non-existent items
+		setPriceMissing = false
+		zap.L().Debug("Set has cached not-found price for currency",
+			zap.String("set_id", setID.String()),
+			zap.String("currency", currency.String()),
+		)
 	} else {
 		// Set price is valid and up-to-date, use its currency symbol
 		currencySymbol = price.Currency
@@ -185,6 +197,20 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 
 		// Update BrickSet with most recent Brick data from cache
 		brickSet.Brick = brick
+
+		// Check if this brick ID has a cached "not found" entry for the currency
+		if set.HasCachedNotFound(brick.Prices, currency, database.DB().Redis().TTLS.BrickPrice) {
+			// Not-found status is fresh - include brick in response but don't add to bricksWoPrices
+			// The brick will appear without a price, which is expected for items that don't exist
+			zap.L().Debug("Brick has cached not-found price for currency",
+				zap.String("brick_id", string(brickID)),
+				zap.String("currency", currency.String()),
+			)
+			bricks = append(bricks, brickSet)
+			continue
+		}
+
+		// Verify if the Brick has a valid price for the requested currency
 		if !set.HasValidPrice(brick.Prices, currency, database.DB().Redis().TTLS.BrickPrice) {
 			// Brick price for requested currency is missing or outdated
 			bricksWoPrices = append(bricksWoPrices, brickSet)

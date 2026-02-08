@@ -76,7 +76,7 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 		if created || !item.Prices.HasCurrency(currency) {
 
 			// Fetch details from LEGO and BrickLink to get missing data like slug, URLs, prices, etc.
-			ok, err = set.FetchDetails(r.Context(), item.Id, &item, locale, currency)
+			_, err = set.FetchDetails(r.Context(), item.Id, &item, locale, currency)
 			if err != nil {
 				// Error already logged, skip this item
 				continue

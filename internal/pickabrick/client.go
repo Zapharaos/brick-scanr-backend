@@ -1,11 +1,18 @@
 package pickabrick
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/throttle"
 	"github.com/spf13/viper"
+)
+
+// Error types
+var (
+	// ErrBrickNotFound indicates that the brick was not found in Pick-a-Brick API
+	ErrBrickNotFound = errors.New("brick not found in pick-a-brick")
 )
 
 // Client handles all Pick-a-Brick API interactions

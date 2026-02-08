@@ -83,7 +83,7 @@ func (rs *RuntimeSet) handleDataChangeCompleted(change dataChange) {
 		} else {
 			s = change.Set
 		}
-		rs.broadcastPacket(NewPacketSet(s, false))
+		rs.broadcastPacket(NewPacketSet(s, true))
 		break
 	default:
 		break
