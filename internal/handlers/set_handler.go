@@ -44,14 +44,13 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract locale + currency from context
-	locale := GetLocaleFromContext(r)
-	currency := GetCurrencyFromContext(r)
-
+	// Extract language + xlocale from context
+	lang := GetLanguageFromContext(r)
+	xlocale := GetXLocaleFromContext(r)
 	// TODO : ISSUE #5 - Search Brick
 
 	// Execute search on BrickLink
-	bricklinkSets, err := bricklink.C().SearchSets(query)
+	bricklinkSets, err := bricklink.C().SearchSets(query, lang)
 	if err != nil {
 		zap.L().Error("Failed to search sets",
 			zap.Error(err),
@@ -72,11 +71,11 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// If the set was newly created or misses currency, fetch full details
-		if created || !item.Prices.HasCurrency(currency) {
+		// If the set was newly created or misses price for xlocale, fetch full details
+		if created || !item.Prices.HasTag(xlocale) {
 
-			// Fetch details from LEGO and BrickLink to get missing data like slug, URLs, prices, etc.
-			_, err = set.FetchDetails(r.Context(), item.Id, &item, locale, currency)
+			// Fetch details from LEGO and BrickLink to get details data
+			_, err = set.FetchDetails(r.Context(), item.Id, &item, lang, xlocale)
 			if err != nil {
 				// Error already logged, skip this item
 				continue
@@ -96,8 +95,8 @@ func SearchSets(w http.ResponseWriter, r *http.Request) {
 
 		// Append to results with external representation
 		sets = append(sets, set.SetExternal{
-			Set:      item,
-			Currency: currency.String(),
+			Set:     item,
+			XLocale: xlocale.String(),
 		})
 	}
 
@@ -205,19 +204,20 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		setId = id // resolved UUID from slug
 	}
 
-	// Extract locale + currency from context
-	locale := GetLocaleFromContext(r)
-	currency := GetCurrencyFromContext(r)
+	// Extract language + xlocale from context
+	lang := GetLanguageFromContext(r)
+	xlocale := GetXLocaleFromContext(r)
 
 	zap.L().Info("FetchSetDetails endpoint called",
 		zap.String("id", setId.String()),
-		zap.String("locale", locale.String()),
-		zap.String("currency", currency.String()),
+		zap.String("language", lang.String()),
+		zap.String("xlocale", xlocale.String()),
 		zap.String("remote_addr", r.RemoteAddr),
 	)
 
 	// Look for any form of cached data, either through runtime or cache
-	cacheResult, err := h.srh.CheckCachedSet(r.Context(), setId, currency)
+	// TODO : handle types for lang and xlocale data
+	cacheResult, err := h.srh.CheckCachedSet(r.Context(), setId, xlocale)
 	if err != nil || cacheResult == nil {
 		render.Error(w, r, err, "Failed to check cached set data")
 		return
@@ -243,12 +243,12 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 
 	case setruntime.CacheStatusIncomplete:
 		// Data is cached but incomplete : missing prices, bricks, currency, etc.
-		h.handleSetFetchIncomplete(w, r, setId, cacheResult, locale, currency)
+		h.handleSetFetchIncomplete(w, r, setId, cacheResult, lang, xlocale)
 		return
 
 	case setruntime.CacheStatusFailed, setruntime.CacheStatusNeedsRefetch, setruntime.CacheStatusMissing:
 		// Need to start a new complete fetch
-		h.handleFetchSetComplete(w, r, setId, locale, currency)
+		h.handleFetchSetComplete(w, r, setId, lang, xlocale)
 		return
 
 	default:
@@ -257,10 +257,11 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleSetFetchIncomplete handles the case where we need to fetch missing bricks
-func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request, setId uuid.UUID, cacheResult *setruntime.CacheCheckResult, locale, currency language.Tag) {
+// handleSetFetchIncomplete handles the case where we need to fetch missing elements
+func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request, setId uuid.UUID, cache *setruntime.CacheCheckResult, lang, xlocale language.Tag) {
 	// Create the key for this operation
-	key := setruntime.NewRuntimeSetKey(setId, currency, setruntime.OpTypeIncomplete)
+	// TODO : runtime set key to have lang and xlocale ?
+	key := setruntime.NewRuntimeSetKey(setId, xlocale, setruntime.OpTypeIncomplete)
 
 	// Check if there's already a runtime for this exact operation
 	if rs, ok := h.srh.FindRuntimeSetByKey(key); ok {
@@ -279,19 +280,19 @@ func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request
 	}
 
 	// Create websocket runtime for fetching
-	rs := h.srh.RunSet(cacheResult.Set, currency, setruntime.OpTypeIncomplete)
+	rs := h.srh.RunSet(cache.Set, xlocale, setruntime.OpTypeIncomplete)
 
 	// Add all bricks to the runtime in their original order
-	rs.AddBricks(cacheResult.Set.Bricks)
+	rs.AddBricks(cache.Set.Bricks)
 
 	// Start goroutine to fetch missing bricks
 	go h.srh.FetchFetchSetIncomplete(
 		context.Background(),
 		rs,
 		setId,
-		cacheResult,
-		locale,
-		currency,
+		cache,
+		lang,
+		xlocale,
 	)
 
 	// Return websocket ID for client to connect
@@ -303,9 +304,9 @@ func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request
 }
 
 // handleFetchSetComplete handles the case where we need to perform a complete fetch
-func (h Handler) handleFetchSetComplete(w http.ResponseWriter, r *http.Request, setId uuid.UUID, locale, currency language.Tag) {
+func (h Handler) handleFetchSetComplete(w http.ResponseWriter, r *http.Request, setId uuid.UUID, lang, xlocale language.Tag) {
 	// Retrieve BrickLink set info from cache
-	cachedSet, err := set.GetRedisSet(r.Context(), setId)
+	cacheSet, err := set.GetRedisSet(r.Context(), setId)
 	if err != nil {
 		// TTL most likely expired - cannot proceed
 		render.NotFound(w, r, err)
@@ -314,20 +315,20 @@ func (h Handler) handleFetchSetComplete(w http.ResponseWriter, r *http.Request, 
 
 	// Prepare the external set representation for the runtime
 	se := set.SetExternal{
-		Set: cachedSet,
+		Set: cacheSet,
 	}
 
 	// Create websocket
-	rs := h.srh.RunSet(se, currency, setruntime.OpTypeFull)
+	rs := h.srh.RunSet(se, xlocale, setruntime.OpTypeFull)
 
 	// Start processing in background
 	go h.srh.FetchSetComplete(
 		context.Background(),
 		rs,
 		setId,
-		cachedSet,
-		locale,
-		currency,
+		cacheSet,
+		lang,
+		xlocale,
 	)
 
 	// Return websocket ID for client to connect
@@ -363,8 +364,8 @@ func (h Handler) SetDetailsWebSocket(w http.ResponseWriter, r *http.Request) {
 	if rs == nil {
 		// Check if set failed in cache
 		// The error could vary since FetchStatus might evolve if another runtime took over (low probability and returns an error anyway).
-		cachedSet, err := set.GetRedisSet(r.Context(), rsId)
-		if err == nil && cachedSet.FetchStatus == set.FetchStatusFailed {
+		cacheSet, err := set.GetRedisSet(r.Context(), rsId)
+		if err == nil && cacheSet.FetchStatus == set.FetchStatusFailed {
 			render.Error(w, r, fmt.Errorf("FetchStatusFailed"), fmt.Sprintf("Set %s FetchStatusFailed", rsId.String()))
 			return
 		}

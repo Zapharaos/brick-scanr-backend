@@ -47,9 +47,9 @@ type Set struct {
 	Id uuid.UUID `json:"id"`
 
 	// General data
-	Number string             `json:"number"`
-	Slug   string             `json:"slug"`
-	Prices PricePerCurrencies `json:"prices"`
+	Number string      `json:"number"`
+	Slug   string      `json:"slug"`
+	Prices PricePerTag `json:"prices"`
 
 	// Could be made locale specific, but not for now
 	Status          Status `json:"status"`
@@ -67,13 +67,13 @@ type Set struct {
 }
 
 // BuildLegoURL constructs the LEGO product URL based on the set's slug and the provided locale
-func (s *Set) BuildLegoURL(locale language.Tag) {
-	s.LegoURL = "https://www.lego.com/" + locale.String() + "/product/" + s.Slug
+func (s *Set) BuildLegoURL(xlocale language.Tag) {
+	s.LegoURL = "https://www.lego.com/" + xlocale.String() + "/product/" + s.Slug
 }
 
 // BuildInstructionsURL constructs the LEGO building instructions URL based on the set's number and the provided locale
-func (s *Set) BuildInstructionsURL(locale language.Tag) {
-	s.InstructionsURL = "https://www.lego.com/" + locale.String() + "/service/building-instructions/" + s.Number
+func (s *Set) BuildInstructionsURL(xlocale language.Tag) {
+	s.InstructionsURL = "https://www.lego.com/" + xlocale.String() + "/service/building-instructions/" + s.Number
 }
 
 // GenerateSlug creates a URL-friendly slug for the set based on its name and number, with normalization and fallback logic

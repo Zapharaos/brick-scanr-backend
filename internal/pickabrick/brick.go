@@ -53,12 +53,12 @@ type Brick struct {
 }
 
 // FetchBricksByDesignID fetches all bricks matching the designID
-func (c *Client) FetchBricksByDesignID(designID string, locale language.Tag, currency language.Tag) ([]Brick, error) {
+func (c *Client) FetchBricksByDesignID(designID string, lang, xlocale language.Tag) ([]Brick, error) {
 
 	zap.L().Debug("Fetching Pick-a-Brick elements by design ID",
 		zap.String("design_id", designID),
-		zap.String("locale", locale.String()),
-		zap.String("currency", currency.String()),
+		zap.String("lang", lang.String()),
+		zap.String("xlocale", xlocale.String()),
 	)
 
 	// GraphQL query from the LEGO API
@@ -153,8 +153,8 @@ fragment ElementFacetCategory on ElementCategory {
 	// Set required headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Language", locale.String()+",en;q=0.9")
-	req.Header.Set("x-locale", currency.String())
+	req.Header.Set("Accept-Language", lang.String()+",en;q=0.9")
+	req.Header.Set("x-locale", xlocale.String())
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36")
 	req.Header.Set("Origin", "https://www.lego.com")
 	req.Header.Set("Referer", "https://www.lego.com/en-us/pick-and-build/pick-a-brick")
@@ -206,12 +206,12 @@ fragment ElementFacetCategory on ElementCategory {
 }
 
 // FetchBricksByBrickID fetches a specific brick by its element ID (brick ID)
-func (c *Client) FetchBricksByBrickID(brickID string, locale language.Tag, currency language.Tag) ([]Brick, error) {
+func (c *Client) FetchBricksByBrickID(brickID string, lang, xlocale language.Tag) ([]Brick, error) {
 
 	zap.L().Debug("Fetching Pick-a-Brick element by brick ID",
 		zap.String("brick_id", brickID),
-		zap.String("locale", locale.String()),
-		zap.String("currency", currency.String()),
+		zap.String("lang", lang.String()),
+		zap.String("xlocale", xlocale.String()),
 	)
 
 	// GraphQL query from the LEGO API
@@ -371,8 +371,8 @@ fragment ElementFacetCategory on ElementCategory {
 	// Set required headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Language", locale.String()+",en;q=0.9")
-	req.Header.Set("x-locale", currency.String())
+	req.Header.Set("Accept-Language", lang.String()+",en;q=0.9")
+	req.Header.Set("x-locale", xlocale.String())
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36")
 	req.Header.Set("Origin", "https://www.lego.com")
 	req.Header.Set("Referer", "https://www.lego.com/en-us/pick-and-build/pick-a-brick")

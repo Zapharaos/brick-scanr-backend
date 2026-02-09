@@ -16,7 +16,7 @@ type DetailsResponse struct {
 type SetExternal struct {
 	Set
 
-	Currency     string `json:"currency"`
+	XLocale      string `json:"xlocale"`
 	TotalPrice   Price  `json:"total_price"`
 	MissingParts int    `json:"missing_parts"`
 }
@@ -25,8 +25,8 @@ type SetExternal struct {
 // It does not calculate the total price from bricks, use CalculateBricksTotalPrices for that.
 func (s *SetExternal) ApplyTotalPrice(centAmount int, currencySymbol string) {
 	s.TotalPrice = Price{
-		CentAmount: centAmount,
-		Currency:   currencySymbol,
-		FetchedAt:  time.Now().UnixMilli(),
+		CentAmount:   centAmount,
+		CurrencyCode: currencySymbol,
+		FetchedAt:    time.Now().UnixMilli(),
 	}
 }

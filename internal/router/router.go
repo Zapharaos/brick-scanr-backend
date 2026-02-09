@@ -58,9 +58,8 @@ func New(setHandler *setruntime.Handler) *Router {
 
 	r.Route("/api/v1", func(r chi.Router) {
 
-		// Locale & Currency for all routes
+		// Accept-Language & X-Locale for all routes
 		r.Use(mid.LocaleMiddleware)
-		r.Use(mid.CurrencyMiddleware)
 
 		r.Route("/set", func(r chi.Router) {
 			r.Get("/search/{query}", handlers.SearchSets)

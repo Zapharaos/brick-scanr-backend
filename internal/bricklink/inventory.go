@@ -10,10 +10,11 @@ import (
 
 	"go.uber.org/zap"
 	"golang.org/x/net/html"
+	"golang.org/x/text/language"
 )
 
 // FetchInventory fetches the inventory data for a given set number
-func (c *Client) FetchInventory(itemID int, setNumber string) (*Inventory, error) {
+func (c *Client) FetchInventory(itemID int, setNumber string, lang language.Tag) (*Inventory, error) {
 	baseURL := "https://www.bricklink.com/v2/catalog/catalogitem_invtab.page"
 	params := url.Values{}
 	params.Add("idItem", fmt.Sprintf("%d", itemID))
@@ -33,7 +34,7 @@ func (c *Client) FetchInventory(itemID int, setNumber string) (*Inventory, error
 	}
 
 	req.Header.Set("Accept", "text/html, */*; q=0.01")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Accept-Language", lang.String()+",en;q=0.9")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Referer", "https://www.bricklink.com/")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")

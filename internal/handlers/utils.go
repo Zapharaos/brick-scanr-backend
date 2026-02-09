@@ -35,36 +35,36 @@ func ParseParamUUID(w http.ResponseWriter, r *http.Request, key string) (uuid.UU
 	return id, ok
 }
 
-// GetLocaleFromContext extracts the locale from the request context
-func GetLocaleFromContext(r *http.Request) language.Tag {
-	_locale := r.Context().Value(app.ContextKeyLocale)
-	if _locale == nil {
-		locale := utils.GetLocale()
-		zap.L().Warn("No context locale provided, using default", zap.String("locale", locale.String()))
-		return locale
+// GetLanguageFromContext extracts the language from the request context
+func GetLanguageFromContext(r *http.Request) language.Tag {
+	_language := r.Context().Value(app.ContextKeyLanguage)
+	if _language == nil {
+		tag := utils.GetLocale()
+		zap.L().Warn("No context language provided, using default", zap.String("language", tag.String()))
+		return tag
 	}
-	result, ok := _locale.(language.Tag)
+	result, ok := _language.(language.Tag)
 	if !ok {
-		locale := utils.GetLocale()
-		zap.L().Warn("Invalid locale type in context, using default", zap.String("locale", locale.String()))
-		return locale
+		tag := utils.GetLocale()
+		zap.L().Warn("Invalid language type in context, using default", zap.String("language", tag.String()))
+		return tag
 	}
 	return result
 }
 
-// GetCurrencyFromContext extracts the currency from the request context
-func GetCurrencyFromContext(r *http.Request) language.Tag {
-	_currency := r.Context().Value(app.ContextKeyCurrency)
-	if _currency == nil {
-		currency := utils.GetCurrency()
-		zap.L().Warn("No context currency provided, using default", zap.String("currency", currency.String()))
-		return currency
+// GetXLocaleFromContext extracts the x-locale from the request context
+func GetXLocaleFromContext(r *http.Request) language.Tag {
+	_xlocale := r.Context().Value(app.ContextKeyXLocale)
+	if _xlocale == nil {
+		tag := utils.GetLocale()
+		zap.L().Warn("No context x-locale provided, using default", zap.String("x-locale", tag.String()))
+		return tag
 	}
-	result, ok := _currency.(language.Tag)
+	result, ok := _xlocale.(language.Tag)
 	if !ok {
-		currency := utils.GetCurrency()
-		zap.L().Warn("Invalid currency type in context, using default", zap.String("currency", currency.String()))
-		return currency
+		tag := utils.GetLocale()
+		zap.L().Warn("Invalid x-locale type in context, using default", zap.String("x-locale", tag.String()))
+		return tag
 	}
 	return result
 }

@@ -21,7 +21,7 @@ type Brick struct {
 	IDs      []BrickID `json:"ids"`
 	DesignID DesignID  `json:"design_id"`
 	IsCustom bool      `json:"is_custom"`
-	Prices   PricePerCurrencies
+	Prices   PricePerTag
 
 	// Could be made locale specific, but not for now
 	Status        Status `json:"status"`
@@ -54,8 +54,8 @@ func (b *Brick) GetBrickIDForRedis() (BrickID, error) {
 	return keyID, nil
 }
 
-// BuildPickabrickURL constructs the Pick-a-Brick URL for the Brick based on its ID and the given locale
-func (b *Brick) BuildPickabrickURL(locale language.Tag) {
+// BuildPickabrickURL constructs the Pick-a-Brick URL for the Brick based on its ID and the given xlocale
+func (b *Brick) BuildPickabrickURL(xlocale language.Tag) {
 	var id string
 	if b.MainID != nil {
 		id = string(*b.MainID)
@@ -64,33 +64,33 @@ func (b *Brick) BuildPickabrickURL(locale language.Tag) {
 	} else {
 		id = string(b.DesignID)
 	}
-	b.PickabrickURL = "https://www.lego.com/" + locale.String() + "/pick-and-build/pick-a-brick?selectedElement=" + id
+	b.PickabrickURL = "https://www.lego.com/" + xlocale.String() + "/pick-and-build/pick-a-brick?selectedElement=" + id
 }
 
-// SetPrice sets the price for the given currency in the Brick's Prices map
-func (b *Brick) SetPrice(price Price, currency language.Tag) {
+// SetPrice sets the price for the given xlocale in the Brick's Prices map
+func (b *Brick) SetPrice(price Price, xlocale language.Tag) {
 	if b.Prices == nil {
 		b.Prices = make(map[language.Tag]*Price)
 	}
-	b.Prices[currency] = &price
+	b.Prices[xlocale] = &price
 }
 
 // HasValidPrice checks if the Brick has a valid and up-to-date price for the given locale tag
-func (b *Brick) HasValidPrice(currency language.Tag) bool {
-	return HasValidPrice(b.Prices, currency, database.DB().Redis().TTLS.BrickPrice)
+func (b *Brick) HasValidPrice(xlocale language.Tag) bool {
+	return HasValidPrice(b.Prices, xlocale, database.DB().Redis().TTLS.BrickPrice)
 }
 
-// HasLowerPrice compares the price of the current Brick with another Brick for the given currency
+// HasLowerPrice compares the price of the current Brick with another Brick for the given xlocale
 // returning true if current has a valid price that is lower than the other, else false
-func (b *Brick) HasLowerPrice(b2 Brick, currency language.Tag) bool {
-	// First check if the current brick has a valid price for the currency
-	if b.HasValidPrice(currency) {
-		p1, _ := b.Prices.GetPrice(currency)
-		if !b2.HasValidPrice(currency) {
+func (b *Brick) HasLowerPrice(b2 Brick, xlocale language.Tag) bool {
+	// First check if the current brick has a valid price for the xlocale
+	if b.HasValidPrice(xlocale) {
+		p1, _ := b.Prices.GetPrice(xlocale)
+		if !b2.HasValidPrice(xlocale) {
 			// If b2 doesn't have a valid price, we consider b1 as having a lower price
 			return true
 		}
-		p2, _ := b2.Prices.GetPrice(currency)
+		p2, _ := b2.Prices.GetPrice(xlocale)
 		// Both have valid prices, compare them
 		return p1.IsLower(p2.CentAmount)
 	}
@@ -98,7 +98,7 @@ func (b *Brick) HasLowerPrice(b2 Brick, currency language.Tag) bool {
 }
 
 // MapBrickFromPickabrick maps a Pickabrick Brick to an internal Brick representation, updating price and other fields
-func MapBrickFromPickabrick(brick Brick, brickID BrickID, pab pickabrick.Brick, locale, currency language.Tag) Brick {
+func MapBrickFromPickabrick(brick Brick, brickID BrickID, pab pickabrick.Brick, xlocale language.Tag) Brick {
 	// Prepare fetched price
 	pbp := MapPriceFromPickabrick(pab.Price)
 	pbp.ItemID = string(brickID)
@@ -108,12 +108,12 @@ func MapBrickFromPickabrick(brick Brick, brickID BrickID, pab pickabrick.Brick, 
 	if brick.Prices == nil {
 		brick.Prices = make(map[language.Tag]*Price)
 	}
-	brick.Prices[currency] = &pbp
+	brick.Prices[xlocale] = &pbp
 
 	// Update additional fields from Pick-a-Brick
 	brick.MainID = &brickID
 	brick.DesignID = DesignID(pab.DesignID)
-	brick.BuildPickabrickURL(locale)
+	brick.BuildPickabrickURL(xlocale)
 	brick.Status = MapPickabrickStatus(pab.Availability)
 	brick.Color = MapColorFromPickabrick(pab)
 	brick.Name = pab.Name

@@ -22,26 +22,26 @@ const (
 
 // RuntimeSetKey uniquely identifies a runtime set operation
 type RuntimeSetKey struct {
-	SetID    uuid.UUID
-	Currency language.Tag
-	OpType   OperationType
+	SetID   uuid.UUID
+	XLocale language.Tag
+	OpType  OperationType
 }
 
-func NewRuntimeSetKey(setID uuid.UUID, currency language.Tag, opType OperationType) RuntimeSetKey {
+func NewRuntimeSetKey(setID uuid.UUID, xlocale language.Tag, opType OperationType) RuntimeSetKey {
 	return RuntimeSetKey{
-		SetID:    setID,
-		Currency: currency,
-		OpType:   opType,
+		SetID:   setID,
+		XLocale: xlocale,
+		OpType:  opType,
 	}
 }
 
 func (k RuntimeSetKey) String() string {
-	return fmt.Sprintf("%s_%s_%s", k.SetID, k.Currency, k.OpType)
+	return fmt.Sprintf("%s_%s_%s", k.SetID, k.XLocale, k.OpType)
 }
 
 type RuntimeSet struct {
 	ID  uuid.UUID     // Unique ID for this runtime set (used for websocket connections)
-	key RuntimeSetKey // Key identifying the operation (SetID + Currency + OpType)
+	key RuntimeSetKey // Key identifying the operation (SetID + XLocale + OpType)
 	opt RuntimeOptions
 
 	// setMutex protects concurrent access to the set field

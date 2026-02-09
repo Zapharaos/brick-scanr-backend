@@ -169,12 +169,12 @@ func (rs *RuntimeSet) calculateFinalData() {
 
 	// Determine the currency symbol to use for the total price
 	var currencySymbol string
-	price, ok := rs.set.Prices.GetPrice(rs.key.Currency)
+	price, ok := rs.set.Prices.GetPrice(rs.key.XLocale)
 	if ok && price != nil {
-		currencySymbol = price.Currency
+		currencySymbol = price.CurrencyCode
 	} else {
 		// Default - should not happen as price should have been fetched before
-		currencySymbol = rs.key.Currency.String()
+		currencySymbol = rs.key.XLocale.String()
 	}
 
 	// Update final data

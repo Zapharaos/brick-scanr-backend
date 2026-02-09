@@ -25,33 +25,33 @@ const (
 type CacheCheckResult struct {
 	Status         CacheStatus     // Status indicates what action should be taken
 	Set            set.SetExternal // Set contains the cached set data (if available)
-	SetWoPrice     bool            // SetWoPrice indicates if the set price needs a price update for the requested currency
-	BricksWoPrices []set.BrickSet  // BricksWoPrices contains Bricks that need price updates for the requested currency
+	SetWoPrice     bool            // SetWoPrice indicates if the set price needs a price update for the requested xlocale
+	BricksWoPrices []set.BrickSet  // BricksWoPrices contains Bricks that need price updates for the requested xlocale
 	RsID           uuid.UUID       // RsID ID of the runtime set if applicable
 }
 
 // CheckCachedSet checks Redis cache for set data and determines what action is needed
-func (h *Handler) CheckCachedSet(ctx context.Context, setID uuid.UUID, currency language.Tag) (*CacheCheckResult, error) {
+func (h *Handler) CheckCachedSet(ctx context.Context, setID uuid.UUID, xlocale language.Tag) (*CacheCheckResult, error) {
 	// Search for the active runtime sets
 	rss := h.FindRuntimeSetBySetId(setID)
 
 	// No active runtime sets found, check redis cache to decide next steps
 	if len(rss) == 0 {
-		return checkSetInRedis(ctx, setID, currency)
+		return checkSetInRedis(ctx, setID, xlocale)
 	}
 
 	// There are active runtime sets for this set ID, process them to decide next steps
 	missesCachedData := false
 	for _, rs := range rss {
 
-		// Check if the runtime set is fetching with the requested currency
-		if rs.Key().Currency == currency {
+		// Check if the runtime set is fetching with the requested xlocale
+		if rs.Key().XLocale == xlocale {
 			switch rs.GetFetchStatus() {
 			case set.FetchStatusPending, set.FetchStatusFetching:
 				// Runtime is fetching or pending, let the caller join it
 				zap.L().Info("Set details currently being fetched in runtime set",
 					zap.String("set_id", setID.String()),
-					zap.String("currency", currency.String()),
+					zap.String("xlocale", xlocale.String()),
 				)
 				return &CacheCheckResult{
 					Status: CacheStatusFetching,
@@ -63,7 +63,7 @@ func (h *Handler) CheckCachedSet(ctx context.Context, setID uuid.UUID, currency 
 				// Very low probability to reach this case here since the RS should be cleared right after completing
 				zap.L().Info("Set details already fetched and cached in runtime set",
 					zap.String("set_id", setID.String()),
-					zap.String("currency", currency.String()),
+					zap.String("xlocale", xlocale.String()),
 				)
 				return &CacheCheckResult{
 					Status: CacheStatusComplete,
@@ -78,7 +78,7 @@ func (h *Handler) CheckCachedSet(ctx context.Context, setID uuid.UUID, currency 
 		}
 
 		if rs.Key().OpType == OpTypeFull {
-			// There is an active runtime set fetching the full set details but not with the requested currency unless it has failed
+			// There is an active runtime set fetching the full set details but not with the requested xlocale unless it has failed
 			// It means that crucial data is most likely missing
 			missesCachedData = true
 		} else {
@@ -87,27 +87,27 @@ func (h *Handler) CheckCachedSet(ctx context.Context, setID uuid.UUID, currency 
 	}
 
 	if missesCachedData {
-		// There is an active runtime set fetching the full set details but not with the requested currency, unless it has failed
+		// There is an active runtime set fetching the full set details but not with the requested xlocale, unless it has failed
 
-		// Option 1 - Start a new RS to fetch all with the requested currency
-		// check for valid cached data, if existing then care for missing prices / missing currencies / outdated currency prices
+		// Option 1 - Start a new RS to fetch all with the requested xlocale
+		// check for valid cached data, if existing then care for missing prices / missing currencies / outdated xlocale prices
 
-		// Option 2 - Wait for ongoing RS to finish inventory, then filter missing/outdated prices with currency, then fetch them
+		// Option 2 - Wait for ongoing RS to finish inventory, then filter missing/outdated prices with xlocale, then fetch them
 
 		// For simplicity, we will go with Option 1 for now
-		zap.L().Info("Set details missing cached data for requested currency, needs refetch",
+		zap.L().Info("Set details missing cached data for requested xlocale, needs refetch",
 			zap.String("set_id", setID.String()),
-			zap.String("requested_currency", currency.String()),
+			zap.String("xlocale", xlocale.String()),
 		)
 		return &CacheCheckResult{Status: CacheStatusNeedsRefetch}, nil
 	}
 
-	// There are active runtime sets, but none match the requested currency
+	// There are active runtime sets, but none match the requested xlocale
 	// Check the set data validity to decide upon the next step
-	return checkSetInRedis(ctx, setID, currency)
+	return checkSetInRedis(ctx, setID, xlocale)
 }
 
-func checkSetInRedis(ctx context.Context, setID uuid.UUID, currency language.Tag) (*CacheCheckResult, error) {
+func checkSetInRedis(ctx context.Context, setID uuid.UUID, xlocale language.Tag) (*CacheCheckResult, error) {
 	// Try to get cached set
 	cachedSet, err := set.GetRedisSet(ctx, setID)
 	if err != nil {
@@ -117,7 +117,7 @@ func checkSetInRedis(ctx context.Context, setID uuid.UUID, currency language.Tag
 	// Check cached fetch status
 	switch cachedSet.FetchStatus {
 	case set.FetchStatusCompleted:
-		return checkSetDataValidity(ctx, cachedSet, setID, currency)
+		return checkSetDataValidity(ctx, cachedSet, setID, xlocale)
 	default:
 		// A previous fetch might have failed, or the redis instance became an orphan without a runtime set link
 		// Therefore the redis set instance will be considered incomplete and as needing refetch
@@ -129,10 +129,10 @@ func checkSetInRedis(ctx context.Context, setID uuid.UUID, currency language.Tag
 }
 
 // checkSetDataValidity validates completed existing data and checks for missing elements
-func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUID, currency language.Tag) (*CacheCheckResult, error) {
+func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUID, xlocale language.Tag) (*CacheCheckResult, error) {
 	zap.L().Info("Set details found in cache, checking Bricks and prices",
 		zap.String("set_id", setID.String()),
-		zap.String("currency", currency.String()),
+		zap.String("xlocale", xlocale.String()),
 	)
 
 	// If there are no bricks in the cached set, it means the data is stale or incomplete, needs refetch
@@ -140,13 +140,13 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 		return &CacheCheckResult{Status: CacheStatusNeedsRefetch}, nil
 	}
 
-	// Since we are only readying, we need to find the currency symbol from any valid price found in the set
-	// This is needed to apply the total price with the correct currency symbol
-	var currencySymbol string
+	// Since we are only readying, we need to find the xlocale symbol from any valid price found in the set
+	// This is needed to apply the total price with the correct xlocale symbol
+	var currencyCode string
 
-	// Check if set price for requested currency is available
+	// Check if set price for requested xlocale is available
 	setPriceMissing := false
-	if price, ok := cachedSet.Prices.GetPrice(currency); !ok {
+	if price, ok := cachedSet.Prices.GetPrice(xlocale); !ok {
 		// No price entry at all
 		setPriceMissing = true
 	} else if price.IsOutdated(database.DB().Redis().TTLS.SetPrice) {
@@ -156,13 +156,13 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 		// Price has not-found flag and is still fresh - don't try to refetch
 		// Set will be returned without a price, which is expected for non-existent items
 		setPriceMissing = false
-		zap.L().Debug("Set has cached not-found price for currency",
+		zap.L().Debug("Set has cached not-found price for xlocale",
 			zap.String("set_id", setID.String()),
-			zap.String("currency", currency.String()),
+			zap.String("xlocale", xlocale.String()),
 		)
 	} else {
-		// Set price is valid and up-to-date, use its currency symbol
-		currencySymbol = price.Currency
+		// Set price is valid and up-to-date, use its xlocale symbol
+		currencyCode = price.CurrencyCode
 	}
 
 	// Prepare slices to hold full Brick data and those missing prices
@@ -189,7 +189,7 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 		// Try to find brick in cache
 		brick, err := set.GetRedisBrick(ctx, brickID)
 		if err != nil {
-			// Brick price for requested currency is missing or outdated
+			// Brick price for requested xlocale is missing or outdated
 			bricksWoPrices = append(bricksWoPrices, brickSet)
 			bricks = append(bricks, brickSet)
 			continue
@@ -198,34 +198,34 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 		// Update BrickSet with most recent Brick data from cache
 		brickSet.Brick = brick
 
-		// Check if this brick ID has a cached "not found" entry for the currency
-		if set.HasCachedNotFound(brick.Prices, currency, database.DB().Redis().TTLS.BrickPrice) {
+		// Check if this brick ID has a cached "not found" entry for the xlocale
+		if set.HasCachedNotFound(brick.Prices, xlocale, database.DB().Redis().TTLS.BrickPrice) {
 			// Not-found status is fresh - include brick in response but don't add to bricksWoPrices
 			// The brick will appear without a price, which is expected for items that don't exist
-			zap.L().Debug("Brick has cached not-found price for currency",
+			zap.L().Debug("Brick has cached not-found price for xlocale",
 				zap.String("brick_id", string(brickID)),
-				zap.String("currency", currency.String()),
+				zap.String("xlocale", xlocale.String()),
 			)
 			bricks = append(bricks, brickSet)
 			continue
 		}
 
-		// Verify if the Brick has a valid price for the requested currency
-		if !set.HasValidPrice(brick.Prices, currency, database.DB().Redis().TTLS.BrickPrice) {
-			// Brick price for requested currency is missing or outdated
+		// Verify if the Brick has a valid price for the requested xlocale
+		if !set.HasValidPrice(brick.Prices, xlocale, database.DB().Redis().TTLS.BrickPrice) {
+			// Brick price for requested xlocale is missing or outdated
 			bricksWoPrices = append(bricksWoPrices, brickSet)
 			bricks = append(bricks, brickSet)
 			continue
 		}
 
 		// Price is valid and up-to-date, apply it
-		brickSet.MustApplyCurrency(currency)
+		brickSet.MustApplyXLocale(xlocale)
 		brickSet.CalculateTotalPrice()
 		totalCentAmount += brickSet.TotalPrice.CentAmount
 
-		// Use the currency symbol from the first valid price found for consistency across the set
-		if currencySymbol == "" {
-			currencySymbol = brickSet.Price.Currency
+		// Use the xlocale symbol from the first valid price found for consistency across the set
+		if currencyCode == "" {
+			currencyCode = brickSet.Price.CurrencyCode
 		}
 
 		bricks = append(bricks, brickSet)
@@ -239,15 +239,15 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 
 	// If all elements are present and up-to-date, return complete
 	if !setPriceMissing && len(bricksWoPrices) == 0 {
-		zap.L().Info("All Bricks have prices for requested currency",
+		zap.L().Info("All Bricks have prices for requested xlocale",
 			zap.String("set_id", setID.String()),
-			zap.String("currency", currency.String()),
+			zap.String("xlocale", xlocale.String()),
 		)
 
 		// Update cached set with final data
 		setFull.MissingParts = 0
-		setFull.Currency = currency.String()
-		setFull.ApplyTotalPrice(totalCentAmount, currencySymbol)
+		setFull.XLocale = xlocale.String()
+		setFull.ApplyTotalPrice(totalCentAmount, currencyCode)
 
 		return &CacheCheckResult{
 			Status: CacheStatusComplete,
@@ -257,16 +257,16 @@ func checkSetDataValidity(ctx context.Context, cachedSet set.Set, setID uuid.UUI
 
 	zap.L().Info("Some Bricks need price updates",
 		zap.String("set_id", setID.String()),
-		zap.String("currency", currency.String()),
+		zap.String("xlocale", xlocale.String()),
 		zap.Bool("set_price_outdated", setPriceMissing),
 		zap.Int("bricks_wo_prices", len(bricksWoPrices)),
 	)
 
 	// Update cached set with final data
-	setFull.Currency = currency.String()
+	setFull.XLocale = xlocale.String()
 	setFull.MissingParts = len(bricksWoPrices)
-	if totalCentAmount > 0 && currencySymbol != "" {
-		setFull.ApplyTotalPrice(totalCentAmount, currencySymbol)
+	if totalCentAmount > 0 && currencyCode != "" {
+		setFull.ApplyTotalPrice(totalCentAmount, currencyCode)
 	}
 
 	return &CacheCheckResult{

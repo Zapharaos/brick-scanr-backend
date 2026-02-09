@@ -24,7 +24,6 @@ func Init(version, buildDate string) {
 	// Initialize utilities
 	utils.RunInitWithTime(utils.InitDate, "Initializing Date")
 	utils.RunInitWithTime(utils.InitLocale, "Initializing Locale")
-	utils.RunInitWithTime(utils.InitCurrency, "Initializing Currency")
 
 	// Initialize Database
 	utils.RunInitWithTime(InitRedis, "Initializing Redis")

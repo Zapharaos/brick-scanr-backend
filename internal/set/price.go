@@ -8,24 +8,24 @@ import (
 	"golang.org/x/text/language"
 )
 
-type PricePerCurrencies map[language.Tag]*Price
+type PricePerTag map[language.Tag]*Price
 
-func (ppc PricePerCurrencies) HasCurrency(tag language.Tag) bool {
+func (ppc PricePerTag) HasTag(tag language.Tag) bool {
 	_, exists := ppc[tag]
 	return exists
 }
 
-func (ppc PricePerCurrencies) GetPrice(tag language.Tag) (*Price, bool) {
+func (ppc PricePerTag) GetPrice(tag language.Tag) (*Price, bool) {
 	price, exists := ppc[tag]
 	return price, exists
 }
 
 type Price struct {
-	CentAmount int    `json:"cent_amount"`
-	Currency   string `json:"currency"`
-	ItemID     string `json:"item_id"`
-	FetchedAt  int64  `json:"fetched_at"`
-	NotFound   bool   `json:"not_found"`
+	CentAmount   int    `json:"cent_amount"`
+	CurrencyCode string `json:"currency_code"`
+	ItemID       string `json:"item_id"`
+	FetchedAt    int64  `json:"fetched_at"`
+	NotFound     bool   `json:"not_found"`
 }
 
 // IsValid checks if the price is valid
@@ -33,7 +33,7 @@ func (p *Price) IsValid() bool {
 	return p != nil &&
 		!p.NotFound &&
 		p.CentAmount > 0 &&
-		p.Currency != ""
+		p.CurrencyCode != ""
 }
 
 // IsOutdated checks if the price is outdated based on the provided TTL duration
@@ -48,14 +48,14 @@ func (p *Price) IsLower(centAmount int) bool {
 
 // HasValidPrice checks if the Brick has a valid and up-to-date price for the given locale tag
 // Returns false if price is not found, outdated, or invalid
-func HasValidPrice(prices PricePerCurrencies, tag language.Tag, ttl time.Duration) bool {
+func HasValidPrice(prices PricePerTag, tag language.Tag, ttl time.Duration) bool {
 	price, ok := prices.GetPrice(tag)
 	return ok && price.IsValid() && !price.IsOutdated(ttl)
 }
 
-// HasCachedNotFound checks if the item has a cached "not found" entry for the given currency
+// HasCachedNotFound checks if the item has a cached "not found" entry for the given tag
 // This helps avoid repeated API calls for items that don't exist
-func HasCachedNotFound(prices PricePerCurrencies, tag language.Tag, ttl time.Duration) bool {
+func HasCachedNotFound(prices PricePerTag, tag language.Tag, ttl time.Duration) bool {
 	price, ok := prices.GetPrice(tag)
 	return ok && price != nil && price.NotFound && !price.IsOutdated(ttl)
 }
@@ -63,15 +63,15 @@ func HasCachedNotFound(prices PricePerCurrencies, tag language.Tag, ttl time.Dur
 // MapPriceFromPickabrick maps a pickabrick.Price to internal Price representation
 func MapPriceFromPickabrick(price pickabrick.Price) Price {
 	return Price{
-		CentAmount: price.CentAmount,
-		Currency:   price.CurrencyCode,
+		CentAmount:   price.CentAmount,
+		CurrencyCode: price.CurrencyCode,
 	}
 }
 
 // MapPriceFromLego maps a lego.Price to internal Price representation
 func MapPriceFromLego(price lego.Price) Price {
 	return Price{
-		CentAmount: price.CentAmount,
-		Currency:   price.CurrencyCode,
+		CentAmount:   price.CentAmount,
+		CurrencyCode: price.CurrencyCode,
 	}
 }

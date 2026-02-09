@@ -36,8 +36,8 @@ func (bs *BrickSet) RestoreAfterCache(price Price, totalPrice Price) {
 	bs.TotalPrice = totalPrice
 }
 
-// MustApplyCurrency sets the Brick's Price and MainID based on the given locale tag if possible, otherwise does nothing
-func (bs *BrickSet) MustApplyCurrency(tag language.Tag) {
+// MustApplyXLocale sets the Brick's Price and MainID based on the given locale tag if possible, otherwise does nothing
+func (bs *BrickSet) MustApplyXLocale(tag language.Tag) {
 	price, ok := bs.Prices.GetPrice(tag)
 	if !ok {
 		return
@@ -50,8 +50,8 @@ func (bs *BrickSet) MustApplyCurrency(tag language.Tag) {
 // CalculateTotalPrice calculates the total price based on unit price and quantity
 func (bs *BrickSet) CalculateTotalPrice() {
 	bs.TotalPrice = Price{
-		CentAmount: bs.Price.CentAmount * bs.Quantity,
-		Currency:   bs.Price.Currency,
+		CentAmount:   bs.Price.CentAmount * bs.Quantity,
+		CurrencyCode: bs.Price.CurrencyCode,
 	}
 }
 

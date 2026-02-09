@@ -24,8 +24,8 @@ func (h *Handler) FetchSetComplete(
 	rs *RuntimeSet,
 	setID uuid.UUID,
 	cachedSet set.Set,
-	locale language.Tag,
-	currency language.Tag,
+	lang language.Tag,
+	xlocale language.Tag,
 ) {
 	defer func() {
 		// Handle panics gracefully
@@ -59,8 +59,8 @@ func (h *Handler) FetchSetComplete(
 	h.PushChange(rs.ID, setID, DataTypeSet, DataTypeCreated)
 
 	// Check if set price is already cached and valid
-	if !set.HasValidPrice(cpRedisSet.Prices, currency, database.DB().Redis().TTLS.SetPrice) {
-		ok, err := set.FetchLegoProductDetails(ctx, setID, &cpRedisSet, locale, currency, true)
+	if !set.HasValidPrice(cpRedisSet.Prices, xlocale, database.DB().Redis().TTLS.SetPrice) {
+		ok, err := set.FetchLegoProductDetails(ctx, setID, &cpRedisSet, lang, xlocale, true)
 		if err == nil && ok {
 			// Successfully fetched details, send update to clients
 			h.PushChange(rs.ID, setID, DataTypeSet, DataTypeUpdated)
@@ -69,12 +69,12 @@ func (h *Handler) FetchSetComplete(
 	}
 
 	// Fetch inventory from BrickLink (sequential - needed for prices)
-	if err := h.fetchInventory(ctx, rs.ID, setID, &cpRedisSet); err != nil {
+	if err := h.fetchInventory(ctx, rs.ID, setID, &cpRedisSet, lang); err != nil {
 		return // Error already handled
 	}
 
 	// Fetch prices from Pick-a-Brick (sequential - depends on inventory)
-	if err := h.fetchBricks(ctx, rs, setID, &cpRedisSet, locale, currency); err != nil {
+	if err := h.fetchBricks(ctx, rs, setID, &cpRedisSet, lang, xlocale); err != nil {
 		return // Error already handled
 	}
 
@@ -99,8 +99,8 @@ func (h *Handler) FetchSetComplete(
 }
 
 // fetchInventory fetches the inventory for a set from BrickLink using a worker pool
-func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid.UUID, cpRedisSet *set.Set) error {
-	inventory, err := bricklink.C().FetchInventory(cpRedisSet.BricklinkID, cpRedisSet.BricklinkNumber)
+func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid.UUID, cpRedisSet *set.Set, lang language.Tag) error {
+	inventory, err := bricklink.C().FetchInventory(cpRedisSet.BricklinkID, cpRedisSet.BricklinkNumber, lang)
 	if err != nil {
 		// Failed to fetch inventory => FATAL
 		handleFatalError(h, rsID, setID, set.FetchErrorFetchInventory, *cpRedisSet, DataTypeBricklinkBricks, err,
@@ -191,7 +191,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rsID uuid.UUID, setID uuid
 }
 
 // fetchBricks fetches prices for all Bricks in a set from Pick-a-Brick using a worker pool
-func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, setID uuid.UUID, cpRedisSet *set.Set, locale language.Tag, currency language.Tag) error {
+func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, setID uuid.UUID, cpRedisSet *set.Set, lang language.Tag, xlocale language.Tag) error {
 	// Calculate total bricks
 	bricksSize := len(cpRedisSet.Bricks)
 
@@ -209,7 +209,7 @@ func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, setID uuid.UU
 
 	// Worker function: fetch prices for a single design ID
 	workerFunc := func(ctx context.Context, brick set.BrickSet) (set.BrickSet, error) {
-		return h.workerHandlerBrickPrice(ctx, setID, brick, locale, currency)
+		return h.workerHandlerBrickPrice(ctx, setID, brick, lang, xlocale)
 	}
 
 	// Batch handler: send batch to frontend
@@ -267,8 +267,8 @@ func (h *Handler) FetchFetchSetIncomplete(
 	rs *RuntimeSet,
 	setID uuid.UUID,
 	cacheResult *CacheCheckResult,
-	locale language.Tag,
-	currency language.Tag,
+	lang language.Tag,
+	xlocale language.Tag,
 ) {
 	defer func() {
 		// Give clients time to receive the message before cleanup
@@ -287,7 +287,7 @@ func (h *Handler) FetchFetchSetIncomplete(
 
 	// Check if set price is outdated
 	if cacheResult.SetWoPrice {
-		ok, err := set.FetchLegoProductDetails(ctx, setID, &cacheResult.Set.Set, locale, currency, true)
+		ok, err := set.FetchLegoProductDetails(ctx, setID, &cacheResult.Set.Set, lang, xlocale, true)
 		if err != nil {
 			handleFatalError(h, rs.ID, setID, set.FetchErrorDetailsCache, cacheResult.Set.Set, DataTypeSet, err,
 				"Failed to update Redis set inventory")
@@ -319,7 +319,7 @@ func (h *Handler) FetchFetchSetIncomplete(
 
 	// Worker function: fetch for a single brick
 	workerFunc := func(ctx context.Context, brick set.BrickSet) (set.BrickSet, error) {
-		return h.workerHandlerBrickPrice(ctx, setID, brick, locale, currency)
+		return h.workerHandlerBrickPrice(ctx, setID, brick, lang, xlocale)
 	}
 
 	// Batch handler: send batch to frontend
@@ -381,8 +381,8 @@ func (h *Handler) workerHandlerBrickPrice(
 	ctx context.Context,
 	setID uuid.UUID,
 	brick set.BrickSet,
-	locale language.Tag,
-	currency language.Tag,
+	lang language.Tag,
+	xlocale language.Tag,
 ) (set.BrickSet, error) {
 
 	// Try to find the best brick ID
@@ -395,25 +395,25 @@ func (h *Handler) workerHandlerBrickPrice(
 		// Check cache first for this specific brick ID
 		if cacheBrick, err := set.GetRedisBrick(ctx, elementID); err == nil {
 			// Check if this brick ID has a valid price for the currency
-			if set.HasValidPrice(cacheBrick.Prices, currency, database.DB().Redis().TTLS.BrickPrice) {
+			if set.HasValidPrice(cacheBrick.Prices, xlocale, database.DB().Redis().TTLS.BrickPrice) {
 				// Check if current brick already has a valid lower price
-				if brick.Brick.HasLowerPrice(cacheBrick, currency) {
+				if brick.Brick.HasLowerPrice(cacheBrick, xlocale) {
 					continue
 				}
 
 				// Found valid cached price for this brick ID
 				brick.Brick = cacheBrick
-				brick.MustApplyCurrency(currency)
+				brick.MustApplyXLocale(xlocale)
 				brick.CalculateTotalPrice()
 				foundValidPrice = true
 				continue
 			}
 
 			// Check if this brick ID has a valid cached not-found entry
-			if set.HasCachedNotFound(cacheBrick.Prices, currency, database.DB().Redis().TTLS.BrickPrice) {
+			if set.HasCachedNotFound(cacheBrick.Prices, xlocale, database.DB().Redis().TTLS.BrickPrice) {
 				zap.L().Debug("Brick ID has cached not-found price, trying next ID",
 					zap.String("elementID", string(elementID)),
-					zap.String("currency", currency.String()),
+					zap.String("xlocale", xlocale.String()),
 					zap.String("design_id", string(brick.DesignID)),
 				)
 				// Remember this ID as not found, but keep trying other IDs
@@ -426,13 +426,13 @@ func (h *Handler) workerHandlerBrickPrice(
 		}
 
 		// No valid cache entry for this brick ID - fetch from API
-		results, err := pickabrick.C().FetchBricksByBrickID(string(elementID), locale, currency)
+		results, err := pickabrick.C().FetchBricksByBrickID(string(elementID), lang, xlocale)
 		if err != nil {
 			// Check if it's a not-found error
 			if errors.Is(err, pickabrick.ErrBrickNotFound) {
 				zap.L().Debug("Brick ID not found in pick-a-brick API",
 					zap.String("elementID", string(elementID)),
-					zap.String("currency", currency.String()),
+					zap.String("xlocale", xlocale.String()),
 					zap.String("design_id", string(brick.DesignID)),
 				)
 
@@ -452,12 +452,12 @@ func (h *Handler) workerHandlerBrickPrice(
 
 				// Set only the not-found price for this currency
 				notFoundPrice := set.Price{
-					NotFound:  true,
-					Currency:  currency.String(),
-					ItemID:    string(elementID),
-					FetchedAt: time.Now().UnixMilli(),
+					NotFound:     true,
+					CurrencyCode: xlocale.String(),
+					ItemID:       string(elementID),
+					FetchedAt:    time.Now().UnixMilli(),
 				}
-				notFoundBrick.Prices[currency] = &notFoundPrice
+				notFoundBrick.Prices[xlocale] = &notFoundPrice
 
 				// Cache this brick ID as not-found (independent entry, won't affect the set's brick)
 				if cacheErr := set.SetRedisBrick(ctx, notFoundBrick, true); cacheErr != nil {
@@ -493,10 +493,10 @@ func (h *Handler) workerHandlerBrickPrice(
 			if set.BrickID(b.ID) == elementID {
 
 				// Map result to local representation
-				mappedB := set.MapBrickFromPickabrick(brick.Brick, elementID, b, locale, currency)
+				mappedB := set.MapBrickFromPickabrick(brick.Brick, elementID, b, xlocale)
 
 				// Check if current price currency is already set, valid and lower
-				if brick.Brick.HasLowerPrice(mappedB, currency) {
+				if brick.Brick.HasLowerPrice(mappedB, xlocale) {
 					continue
 				}
 
@@ -521,7 +521,7 @@ func (h *Handler) workerHandlerBrickPrice(
 				brick.RestoreAfterCache(copyPrice, copyTotalPrice)
 
 				// Update brick with final data for sending to client
-				brick.MustApplyCurrency(currency)
+				brick.MustApplyXLocale(xlocale)
 				brick.CalculateTotalPrice()
 				foundValidPrice = true
 			}
@@ -535,7 +535,7 @@ func (h *Handler) workerHandlerBrickPrice(
 		zap.L().Debug("No valid price found for any brick ID, set MainID to first not-found ID",
 			zap.String("main_id", string(*firstNotFoundID)),
 			zap.String("design_id", string(brick.DesignID)),
-			zap.String("currency", currency.String()),
+			zap.String("xlocale", xlocale.String()),
 		)
 	}
 

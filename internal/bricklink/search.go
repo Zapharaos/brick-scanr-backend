@@ -8,10 +8,11 @@ import (
 	"net/url"
 
 	"go.uber.org/zap"
+	"golang.org/x/text/language"
 )
 
 // SearchSets searches for LEGO sets on BrickLink
-func (c *Client) SearchSets(query string) ([]SearchItem, error) {
+func (c *Client) SearchSets(query string, lang language.Tag) ([]SearchItem, error) {
 	baseURL := "https://www.bricklink.com/ajax/clone/search/searchproduct.ajax"
 	params := url.Values{}
 	params.Add("q", query)
@@ -46,7 +47,7 @@ func (c *Client) SearchSets(query string) ([]SearchItem, error) {
 	}
 
 	req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Accept-Language", lang.String()+",en;q=0.9")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Referer", "https://www.bricklink.com/")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")

@@ -9,19 +9,44 @@ import (
 	"golang.org/x/text/language"
 )
 
+type Header string
+
+const (
+	HeaderAcceptLanguage Header = "Accept-Language"
+	HeaderXLocale        Header = "X-Locale"
+)
+
 // LocaleMiddleware extracts the locale from the Accept-Language header
 func LocaleMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var locale language.Tag
-		tag, _, err := language.ParseAcceptLanguage(r.Header.Get("Accept-Language"))
-		if err != nil || len(tag) == 0 {
+		var tag language.Tag
+
+		// Retrieve accept language header
+		tag, ok, err := parseLanguageTagFromHeader(r, HeaderAcceptLanguage)
+		if !ok || err != nil {
 			// Default to config if no valid locale is found
-			locale = utils.GetLocale()
-		} else {
-			// Use the first valid locale from the Accept-Language header
-			locale = tag[0]
+			tag = utils.GetLocale()
 		}
-		ctx := context.WithValue(r.Context(), app.ContextKeyLocale, locale)
+		ctx := context.WithValue(r.Context(), app.ContextKeyLanguage, tag)
+
+		// Retrieve x-locale header
+		tag, ok, err = parseLanguageTagFromHeader(r, HeaderXLocale)
+		if !ok || err != nil {
+			// Default to config if no valid locale is found
+			tag = utils.GetLocale()
+		}
+		ctx = context.WithValue(ctx, app.ContextKeyXLocale, tag)
+
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// parseLanguageTagFromHeader attempts to parse a language tag from the specified header in the request
+func parseLanguageTagFromHeader(r *http.Request, header Header) (language.Tag, bool, error) {
+	tag, _, err := language.ParseAcceptLanguage(r.Header.Get(string(header)))
+	if err != nil || len(tag) == 0 {
+		return language.Tag{}, false, err
+	}
+	// Use the first valid locale from the Accept-Language header
+	return tag[0], true, nil
 }

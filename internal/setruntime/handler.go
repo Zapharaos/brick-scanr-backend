@@ -40,11 +40,11 @@ func NewHandler(ctx context.Context) *Handler {
 }
 
 // RunSet runs a runtime set, if it is not already running
-func (h *Handler) RunSet(s set.SetExternal, currency language.Tag, opType OperationType) *RuntimeSet {
+func (h *Handler) RunSet(s set.SetExternal, xlocale language.Tag, opType OperationType) *RuntimeSet {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
-	key := NewRuntimeSetKey(s.Id, currency, opType)
+	key := NewRuntimeSetKey(s.Id, xlocale, opType)
 	keyStr := key.String()
 
 	// Check if a runtime set with this exact key already exists
@@ -65,8 +65,8 @@ func (h *Handler) RunSet(s set.SetExternal, currency language.Tag, opType Operat
 		}
 	}
 
-	// Apply the currency to the set, so that it can be communicated to the client for consistency
-	s.Currency = currency.String()
+	// Apply the xlocale to the set, so that it can be communicated to the client for consistency
+	s.XLocale = xlocale.String()
 
 	// Create a new runtime set
 	rs := NewRuntimeSet(s, key, RuntimeOptionsFromConfig(), h.wg, h.ErrorLogger)

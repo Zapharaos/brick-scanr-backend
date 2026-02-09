@@ -13,15 +13,15 @@ import (
 )
 
 // FetchDetails fetches set details from Bricklink and LEGO, updating the set
-func FetchDetails(ctx context.Context, setID uuid.UUID, set *Set, locale language.Tag, currency language.Tag) (bool, error) {
+func FetchDetails(ctx context.Context, setID uuid.UUID, set *Set, lang language.Tag, xlocale language.Tag) (bool, error) {
 	// Fetch Bricklink details
-	err := FetchBricklinkDetais(ctx, set)
+	err := FetchBricklinkDetais(ctx, set, lang)
 	if err != nil {
 		return false, err
 	}
 
 	// Fetch LEGO product details
-	priceFetched, err := FetchLegoProductDetails(ctx, setID, set, locale, currency, false)
+	priceFetched, err := FetchLegoProductDetails(ctx, setID, set, lang, xlocale, false)
 	if err != nil {
 		return false, err
 	}
@@ -30,8 +30,8 @@ func FetchDetails(ctx context.Context, setID uuid.UUID, set *Set, locale languag
 }
 
 // FetchBricklinkDetais fetches set details from Bricklink and updates the set
-func FetchBricklinkDetais(ctx context.Context, set *Set) error {
-	bricklinkSet, err := bricklink.C().FetchSetDetails(set.BricklinkID)
+func FetchBricklinkDetais(ctx context.Context, set *Set, lang language.Tag) error {
+	bricklinkSet, err := bricklink.C().FetchSetDetails(set.BricklinkID, lang)
 	if err != nil {
 		return err
 	}
@@ -53,22 +53,22 @@ func FetchBricklinkDetais(ctx context.Context, set *Set) error {
 }
 
 // FetchLegoProductDetails fetches product details from LEGO and updates the set
-func FetchLegoProductDetails(ctx context.Context, setID uuid.UUID, set *Set, locale language.Tag, currency language.Tag, priceOnly bool) (bool, error) {
+func FetchLegoProductDetails(ctx context.Context, setID uuid.UUID, set *Set, lang language.Tag, xlocale language.Tag, priceOnly bool) (bool, error) {
 	// Fetch product details from LEGO
-	legoProduct, err := lego.C().FetchProductDetails(set.Number, currency)
+	legoProduct, err := lego.C().FetchProductDetails(set.Number, lang, xlocale)
 	if err != nil {
 		// Check if it's a not-found error
 		if errors.Is(err, lego.ErrProductNotFound) {
 			// Cache the not-found status to avoid repeated API calls
 			notFoundPrice := Price{
-				NotFound:  true,
-				Currency:  currency.String(),
-				FetchedAt: time.Now().UnixMilli(),
+				NotFound:     true,
+				CurrencyCode: xlocale.String(),
+				FetchedAt:    time.Now().UnixMilli(),
 			}
 			if set.Prices == nil {
 				set.Prices = make(map[language.Tag]*Price)
 			}
-			set.Prices[currency] = &notFoundPrice
+			set.Prices[xlocale] = &notFoundPrice
 
 			// Update in cache
 			err = SetRedisSet(ctx, *set, true)
@@ -79,7 +79,7 @@ func FetchLegoProductDetails(ctx context.Context, setID uuid.UUID, set *Set, loc
 			zap.L().Info("Cached not-found price for LEGO set",
 				zap.String("set_number", set.Number),
 				zap.String("set_id", setID.String()),
-				zap.String("currency", currency.String()),
+				zap.String("currency", xlocale.String()),
 			)
 			return false, nil
 		}
@@ -96,8 +96,8 @@ func FetchLegoProductDetails(ctx context.Context, setID uuid.UUID, set *Set, loc
 
 	if !priceOnly {
 		set.Slug = legoProduct.Slug
-		set.BuildLegoURL(locale)
-		set.BuildInstructionsURL(locale)
+		set.BuildLegoURL(lang)
+		set.BuildInstructionsURL(lang)
 		set.Status = MapLegoProductStatus(*legoProduct)
 	}
 
@@ -107,11 +107,11 @@ func FetchLegoProductDetails(ctx context.Context, setID uuid.UUID, set *Set, loc
 	if set.Prices == nil {
 		set.Prices = make(map[language.Tag]*Price)
 	}
-	set.Prices[currency] = &lp
+	set.Prices[xlocale] = &lp
 	zap.L().Info("LEGO product price fetched",
 		zap.String("set_number", set.Number),
 		zap.String("set_id", setID.String()),
-		zap.String("currency", currency.String()),
+		zap.String("xlocale", xlocale.String()),
 		zap.Int("price", lp.CentAmount))
 
 	// Update in cache
