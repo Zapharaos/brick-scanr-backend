@@ -55,7 +55,14 @@ func (rs *RuntimeSet) handleDataChangeUpdated(change dataChange) {
 func (rs *RuntimeSet) handleDataChangeCompleted(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
-		rs.broadcastPacket(NewPacketSet(*rs.Read(), true))
+		// Create a runtime set copy
+		cpRsSet := *rs.Read()
+
+		// Retrieve the runtime bricks to ensure we cache the most up-to-date data
+		// They are already sorted by index
+		cpRsSet.Bricks = rs.bricks.get()
+
+		rs.broadcastPacket(NewPacketSet(cpRsSet, true))
 		break
 	default:
 		break

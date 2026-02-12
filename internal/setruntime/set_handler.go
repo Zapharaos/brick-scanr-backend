@@ -28,11 +28,25 @@ func (rs *RuntimeSet) Read() *set.External {
 	return &cpSet
 }
 
+// UpdateLocale safely updates the locale fields of the set
+func (sh *SetHandler) UpdateLocale(locale set.Locale) {
+	sh.mutex.Lock()
+	defer sh.mutex.Unlock()
+	sh.set.Locale = locale
+}
+
 // SetBricks safely updates the bricks of the set
 func (sh *SetHandler) SetBricks(bricks []set.Brick) {
 	sh.mutex.Lock()
 	defer sh.mutex.Unlock()
 	sh.set.SetBricks(bricks, false)
+}
+
+// IncrementMissingParts safely calling set.IncrementMissingParts
+func (sh *SetHandler) IncrementMissingParts() {
+	sh.mutex.Lock()
+	defer sh.mutex.Unlock()
+	sh.set.IncrementMissingParts()
 }
 
 // AddFinalBrickData safely calling set.AddFinalBrickData

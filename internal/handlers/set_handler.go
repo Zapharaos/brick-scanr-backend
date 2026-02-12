@@ -182,6 +182,9 @@ func handleSearchResultBricklinkSet(ctx context.Context, bsi bricklink.SearchIte
 		}, true, true
 	}
 
+	// Note : we might not have found a locale set, but there is at least a core
+	// Warning : the core might not be reliable, it must be checked when fetching its details
+
 	// No errors, data was found and TTL is fine, use the cached UUID
 	return sCache, true, false
 }
@@ -289,10 +292,12 @@ func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request
 	}
 
 	// Create websocket runtime for fetching
+	cache.Set.MissingParts = len(cache.MissingBricks)
 	rs := h.srh.RunSet(cache.Set, xlocale, setruntime.OpTypeIncomplete)
 
 	// Put cache analyze results into the runtime
 	rs.NewBricksHandler(cache.FinalBricks, cache.MissingBricks)
+	missingLocale := cache.MissingLocale
 	missingSetPrice := cache.MissingPrice
 
 	// Start goroutine to fetch missing bricks
@@ -300,6 +305,7 @@ func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request
 		context.Background(),
 		rs,
 		setId,
+		missingLocale,
 		missingSetPrice,
 		lang,
 		xlocale,
@@ -317,7 +323,7 @@ func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request
 func (h Handler) handleFetchSetComplete(w http.ResponseWriter, r *http.Request, setId uuid.UUID, lang, xlocale language.Tag) {
 	// Retrieve BrickLink set info from cache
 	// If there was any set locale data, we would have handled it in the incomplete flow, not here
-	cacheCore, err := set.RedisGetCore(r.Context(), setId)
+	cacheLocaleWithCore, _, err := set.RedisGetLocale(r.Context(), setId, xlocale, true)
 	if err != nil {
 		// TTL most likely expired - cannot proceed
 		render.NotFound(w, r, err)
@@ -326,9 +332,7 @@ func (h Handler) handleFetchSetComplete(w http.ResponseWriter, r *http.Request, 
 
 	// Prepare the external set representation for the runtime
 	se := set.External{
-		Locale: set.Locale{
-			Core: cacheCore,
-		},
+		Locale: cacheLocaleWithCore,
 	}
 
 	// Create websocket

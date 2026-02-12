@@ -112,8 +112,9 @@ func MustDelete(ctx context.Context, key string) {
 }
 
 // MGet retrieves multiple values from Redis by their keys using MGET command
-// Returns a map of key -> value for found keys, and ErrKeyNotFound if any key is missing
-func MGet(ctx context.Context, keys []string) (map[string]string, error) {
+// If allowPartial is true, returns a map of key -> value for found keys only (partial results)
+// If allowPartial is false, returns ErrKeyNotFound if any key is missing
+func MGet(ctx context.Context, keys []string, allowPartial bool) (map[string]string, error) {
 	if len(keys) == 0 {
 		return map[string]string{}, nil
 	}
@@ -124,12 +125,24 @@ func MGet(ctx context.Context, keys []string) (map[string]string, error) {
 	}
 
 	result := make(map[string]string)
+	allFound := true
 	for i, val := range values {
 		if val == nil {
 			// Key not found
-			return nil, ErrKeyNotFound
+			allFound = false
+			if !allowPartial {
+				return nil, ErrKeyNotFound
+			}
+			// Skip this key and continue with partial results
+			continue
 		}
 		result[keys[i]] = val.(string)
+	}
+
+	// If allowPartial is false and not all keys were found, we already returned above
+	// If allowPartial is true but no keys were found at all, return ErrKeyNotFound
+	if allowPartial && len(result) == 0 && !allFound {
+		return nil, ErrKeyNotFound
 	}
 
 	return result, nil

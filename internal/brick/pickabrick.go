@@ -15,7 +15,6 @@ func MapLocaleFromPickabrick(brick Locale, pab pickabrick.Brick, tag language.Ta
 	brick.ElementID = &elementID
 	brick.DesignID = DesignID(pab.DesignID)
 	brick.Name = pab.Name
-	brick.ImageURL = pab.ImageUrl
 
 	// Prepare fetched price
 	pbp := utils.MapPriceFromPickabrick(pab.Price)

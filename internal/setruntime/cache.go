@@ -26,6 +26,7 @@ type CacheSet struct {
 	Status        CacheStatus  // Status indicates what action should be taken
 	RuntimeSetID  uuid.UUID    // RuntimeSetID ID of the runtime set (if applicable)
 	Set           set.External // Set contains the cached set data (if available)
+	MissingLocale bool         // MissingLocale indicates if the set is missing the requested xlocale
 	MissingPrice  bool         // MissingPrice indicates if the set price needs a price update for the requested xlocale
 	MissingBricks []set.Brick  // MissingBricks contains Bricks that need price updates for the requested xlocale
 	FinalBricks   []set.Brick  // FinalBricks contains Bricks that have valid prices for the requested xlocale and can be used as is
@@ -74,7 +75,6 @@ func (h *Handler) GetCacheSet(ctx context.Context, setID uuid.UUID, xlocale lang
 			default:
 				// considering any other status as failed, the RS instance should be cleared soon so allow to ignore here
 				// handling it will now depend on the operation type, see below
-				// it will most likely end up retrying with a new runtime
 			}
 		}
 
@@ -95,6 +95,17 @@ func (h *Handler) GetCacheSet(ctx context.Context, setID uuid.UUID, xlocale lang
 
 		// Option 2 - Wait for ongoing RS to finish inventory, then filter missing/outdated prices with xlocale, then fetch them
 
+		// TODO : look into the singleton inventory map / handler
+
+		// TODO : if active, add an argument to the CacheSet response and return with CacheStatusIncomplete
+		// FetchSetComplete : on RS create, create field in inventory map / handler and forward batch inventory through channel.
+		// 		Handler updates local bricks slice and broadcasts batch to all listeners.
+		// FetchFetchSetIncomplete : on RS create, connect to inventory map / handler and wait for final inventory
+		// 		Upon receiving batches, broadcast them to clients while waiting for inventory to finish.
+		//      Once inventory is complete, process normally and fetchBricks for each of inventory
+
+		// TODO : if inventory not found in singleton, call checkSetInRedis
+
 		// For simplicity, we will go with Option 1 for now
 		zap.L().Info("Set details missing cached data for requested xlocale, needs refetch",
 			zap.String("set_id", setID.String()),
@@ -111,9 +122,28 @@ func (h *Handler) GetCacheSet(ctx context.Context, setID uuid.UUID, xlocale lang
 // checkSetInRedis checks Redis cache for the set data and analyzes it to determine what action is needed
 func checkSetInRedis(ctx context.Context, setID uuid.UUID, xlocale language.Tag) (*CacheSet, error) {
 	// Try to get cached set
-	sCache, err := set.RedisGetLocale(ctx, setID, xlocale, true)
+	sCache, ok, err := set.RedisGetLocale(ctx, setID, xlocale, true)
 	if err != nil {
 		return &CacheSet{Status: CacheStatusMissing}, nil
+	}
+
+	// Having a result here doesn't make it safe : the core's inventory might be stale or incomplete
+
+	// TODO : check the inventory status field for the set core
+	// A -> inventory in not complete, return with CacheStatusNeedsRefetch
+	// B -> inventory is complete, continue
+
+	// For sow and for simplicity, consider as incomplete if fetchStatus is default
+	// If core is found but not locale, we can consider the set as missing cached data instead of a failed fetch
+	if !ok {
+		return &CacheSet{
+			Status: CacheStatusIncomplete,
+			Set: set.External{
+				Locale: sCache,
+			},
+			MissingLocale: true,
+			MissingBricks: sCache.Bricks,
+		}, nil
 	}
 
 	// Check cached fetch status
@@ -213,7 +243,7 @@ func checkBrickCache(ctx context.Context, bSet set.Brick, tag language.Tag) (set
 	originalElementIDs := bSet.Locale.ElementIDs
 
 	// If the brick was correctly cached in the inventory, it should have a valid or not-found cached brick
-	bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, *bSet.ElementID, tag)
+	bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, *bSet.ElementID, tag, true)
 	if valid || notFound {
 		// Brick has valid price in cache, apply its locale data and add to final
 		// Note: if notFound, we could check all ElementID's to be 100% sure, but it should be useless if cached correctly
@@ -228,7 +258,7 @@ func checkBrickCache(ctx context.Context, bSet set.Brick, tag language.Tag) (set
 	// The main ElementID isn't 100% valid, process over the available ElementIDs and decide afterward
 	for _, elementID := range bSet.ElementIDs {
 		// Try to find in cache first
-		bRedis, valid, notFound = bSet.Locale.LoadFromRedis(ctx, elementID, tag)
+		bRedis, valid, notFound = bSet.Locale.LoadFromRedis(ctx, elementID, tag, true)
 		if notFound && firstNotFoundLocale == nil {
 			// Brick Locale cached with not-found price
 			// We can consider this brick as up-to-date with a not-found price

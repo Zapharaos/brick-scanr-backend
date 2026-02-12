@@ -31,17 +31,21 @@ type Core struct {
 
 // SetBricks sets the Bricks for the Core, optionally sorting them by their Index field.
 func (c *Core) SetBricks(bricks []Brick, sort bool) {
+	workingBricks := make([]Brick, len(bricks))
+	copy(workingBricks, bricks)
+
 	// Sort bricks by their Index field if requested before setting them to the set
 	if sort {
-		SortBricksByIndex(bricks)
+		SortBricksByIndex(workingBricks)
 	}
 
 	// Reset each brick's locale information down to core before setting it to the set
-	for _, b := range bricks {
+	for i, b := range workingBricks {
 		b.ResetDownToInventoryCore()
+		workingBricks[i] = b
 	}
 
-	c.Bricks = bricks
+	c.Bricks = workingBricks
 }
 
 // RedisBuildKeyCore creates a Redis key for looking up Core by UUID

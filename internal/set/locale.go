@@ -79,14 +79,15 @@ func RedisBuildKeyLocale(identifier uuid.UUID, tag language.Tag) string {
 }
 
 // RedisGetLocale retrieves a Locale from Redis by its UUID and tag
-func RedisGetLocale(ctx context.Context, setID uuid.UUID, tag language.Tag, withCore bool) (Locale, error) {
+func RedisGetLocale(ctx context.Context, setID uuid.UUID, tag language.Tag, withCore bool) (Locale, bool, error) {
 
 	if withCore {
 		// Use MGET to fetch both Core and Locale in a single atomic operation
+		// allowPartial=true allows us to get Core even if Locale doesn't exist yet
 		coreKey := RedisBuildKeyCore(setID)
 		localeKey := RedisBuildKeyLocale(setID, tag)
 
-		results, err := redis.MGet(ctx, []string{coreKey, localeKey})
+		results, err := redis.MGet(ctx, []string{coreKey, localeKey}, true)
 		if err != nil {
 			zap.L().Error(
 				"failed to fetch core and locale from redis",
@@ -94,11 +95,12 @@ func RedisGetLocale(ctx context.Context, setID uuid.UUID, tag language.Tag, with
 				zap.String("tag", tag.String()),
 				zap.Error(err),
 			)
-			return Locale{}, err
+			return Locale{}, false, err
 		}
 
 		// Unmarshal Core data
 		var core Core
+		coreFound := false
 		if coreData, ok := results[coreKey]; ok {
 			if err = json.Unmarshal([]byte(coreData), &core); err != nil {
 				zap.L().Error(
@@ -106,27 +108,36 @@ func RedisGetLocale(ctx context.Context, setID uuid.UUID, tag language.Tag, with
 					zap.String("setID", setID.String()),
 					zap.Error(err),
 				)
-				return Locale{}, err
+				return Locale{}, false, err
 			}
+			coreFound = true
 		}
 
-		// Unmarshal Locale data
+		// If Core is not found, return error
+		if !coreFound {
+			return Locale{}, false, redis.ErrKeyNotFound
+		}
+
+		// Unmarshal Locale data (optional - if not found, return empty locale with valid core)
 		var locale Locale
+		localeFound := false
 		if localeData, ok := results[localeKey]; ok {
 			if err = json.Unmarshal([]byte(localeData), &locale); err != nil {
-				zap.L().Error(
-					"failed to unmarshal locale data",
+				zap.L().Warn(
+					"failed to unmarshal locale data, returning core with empty locale",
 					zap.String("setID", setID.String()),
 					zap.String("tag", tag.String()),
 					zap.Error(err),
 				)
-				return Locale{}, err
+				locale = Locale{}
+			} else {
+				localeFound = true
 			}
 		}
 
-		// Merge Core data into Locale
+		// Merge Core data into Locale (even if locale was empty/missing)
 		locale.Core = core
-		return locale, nil
+		return locale, localeFound, nil
 	}
 
 	key := RedisBuildKeyLocale(setID, tag)
@@ -137,7 +148,7 @@ func RedisGetLocale(ctx context.Context, setID uuid.UUID, tag language.Tag, with
 			zap.String("setID", setID.String()),
 			zap.Error(err),
 		)
-		return Locale{}, err
+		return Locale{}, false, err
 	}
 
 	// Found cached data, unmarshal it
@@ -148,10 +159,10 @@ func RedisGetLocale(ctx context.Context, setID uuid.UUID, tag language.Tag, with
 			zap.String("setID", setID.String()),
 			zap.Error(err),
 		)
-		return Locale{}, err
+		return Locale{}, false, err
 	}
 
-	return cache, nil
+	return cache, true, nil
 }
 
 // RedisSetLocale stores a Locale in Redis by its UUID and tag
@@ -251,11 +262,12 @@ func RedisGetLocaleByBricklinkID(ctx context.Context, bricklinkID string, tag la
 		return Locale{}, redis.KeyNotFound, redis.ErrKeyNotFound
 	}
 
-	// Now fetch Core and Locale using MGET
+	// Now fetch Core and Locale using MGET with allowPartial=true
+	// This allows us to get the Core even if the Locale doesn't exist yet
 	coreKey := RedisBuildKeyCore(setID)
 	localeKey := RedisBuildKeyLocale(setID, tag)
 
-	results, err := redis.MGet(ctx, []string{coreKey, localeKey})
+	results, err := redis.MGet(ctx, []string{coreKey, localeKey}, true)
 	if err != nil {
 		zap.L().Error(
 			"failed to fetch core and locale from redis by bricklink ID",
@@ -268,6 +280,7 @@ func RedisGetLocaleByBricklinkID(ctx context.Context, bricklinkID string, tag la
 
 	// Unmarshal Core data
 	var core Core
+	coreFound := false
 	if coreData, ok := results[coreKey]; ok {
 		if err = json.Unmarshal([]byte(coreData), &core); err != nil {
 			zap.L().Error(
@@ -278,24 +291,36 @@ func RedisGetLocaleByBricklinkID(ctx context.Context, bricklinkID string, tag la
 			)
 			return Locale{}, redis.KeyNotFound, err
 		}
+		coreFound = true
 	}
 
-	// Unmarshal Locale data
+	// If Core is not found, we cannot proceed - this means the BrickLink ID mapping is stale
+	if !coreFound {
+		zap.L().Warn(
+			"Core data not found for bricklink ID (stale mapping)",
+			zap.String("bricklinkID", bricklinkID),
+			zap.String("setID", setID.String()),
+		)
+		return Locale{}, redis.KeyNotFound, redis.ErrKeyNotFound
+	}
+
+	// Unmarshal Locale data (optional - if not found, we'll return empty locale with valid core)
 	var locale Locale
 	if localeData, ok := results[localeKey]; ok {
 		if err = json.Unmarshal([]byte(localeData), &locale); err != nil {
-			zap.L().Error(
-				"failed to unmarshal locale data",
+			// If locale unmarshal fails, log but continue with empty locale
+			zap.L().Warn(
+				"failed to unmarshal locale data, returning core with empty locale",
 				zap.String("bricklinkID", bricklinkID),
 				zap.String("setID", setID.String()),
 				zap.String("tag", tag.String()),
 				zap.Error(err),
 			)
-			return Locale{}, redis.KeyNotFound, err
+			locale = Locale{}
 		}
 	}
 
-	// Merge Core data into Locale
+	// Merge Core data into Locale (even if locale was empty/missing)
 	locale.Core = core
 
 	// Get remaining TTL for the core key

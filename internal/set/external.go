@@ -31,6 +31,11 @@ func (e *External) CopyWithoutBricks() External {
 	return cp
 }
 
+// IncrementMissingParts increments the MissingParts count while staying within the bounds
+func (e *External) IncrementMissingParts() {
+	e.MissingParts++
+}
+
 // AddFinalBrickData adds the price of a final brick to the total price of the set and updates the missing parts count
 func (e *External) AddFinalBrickData(b Brick) {
 	// Only add brick data if it has a valid price

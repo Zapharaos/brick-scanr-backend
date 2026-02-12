@@ -16,7 +16,7 @@ import (
 // FetchDetails fetches set details from Bricklink and LEGO, updating the set
 func FetchDetails(ctx context.Context, setID uuid.UUID, set *Locale, lang language.Tag, xlocale language.Tag) (bool, error) {
 	// Fetch Bricklink details
-	err := FetchBricklinkDetails(ctx, set.Core, lang)
+	err := FetchBricklinkDetails(ctx, &set.Core, lang)
 	if err != nil {
 		return false, err
 	}
@@ -31,7 +31,7 @@ func FetchDetails(ctx context.Context, setID uuid.UUID, set *Locale, lang langua
 }
 
 // FetchBricklinkDetails fetches set details from Bricklink and updates the set
-func FetchBricklinkDetails(ctx context.Context, set Core, lang language.Tag) error {
+func FetchBricklinkDetails(ctx context.Context, set *Core, lang language.Tag) error {
 	bricklinkSet, err := bricklink.C().FetchSetDetails(set.BricklinkID, lang)
 	if err != nil {
 		return err
@@ -45,7 +45,7 @@ func FetchBricklinkDetails(ctx context.Context, set Core, lang language.Tag) err
 	set.GenerateSlugDefault()
 
 	// Update in cache
-	err = RedisSetCore(ctx, set, true)
+	err = RedisSetCore(ctx, *set, true)
 	if err != nil {
 		return err
 	}
@@ -92,6 +92,7 @@ func FetchLegoProductDetails(ctx context.Context, setID uuid.UUID, set *Locale, 
 	}
 
 	if !priceOnly {
+		set.ImageURL = legoProduct.BaseImgUrl
 		set.Status = utils.MapLegoProductStatus(*legoProduct)
 		set.Name = legoProduct.Name
 		set.Slug = legoProduct.Slug
@@ -109,8 +110,8 @@ func FetchLegoProductDetails(ctx context.Context, setID uuid.UUID, set *Locale, 
 		zap.String("xlocale", xlocale.String()),
 		zap.Int("price", lp.CentAmount))
 
-	// Update in cache
-	err = RedisSetLocale(ctx, *set, xlocale, false, true)
+	// Update in cache, along with core if priceOnly is false because we might update the imageURL
+	err = RedisSetLocale(ctx, *set, xlocale, !priceOnly, true)
 	if err != nil {
 		return false, err
 	}
