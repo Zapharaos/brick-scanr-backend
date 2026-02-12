@@ -1,4 +1,4 @@
-package set
+package brick
 
 import "github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
 
@@ -10,6 +10,16 @@ type Color struct {
 	ContrastHex string `json:"contrast_hex"`
 	FamilyName  string `json:"family_name"`
 	FamilyKey   string `json:"family_key"`
+}
+
+// IsEmpty checks if all fields of the Color struct are empty
+func (c Color) IsEmpty() bool {
+	return c.Name == "" &&
+		c.Key == "" &&
+		c.Hex == "" &&
+		c.ContrastHex == "" &&
+		c.FamilyName == "" &&
+		c.FamilyKey == ""
 }
 
 // MapColorFromPickabrick maps a pickabrick.Brick to a Color struct

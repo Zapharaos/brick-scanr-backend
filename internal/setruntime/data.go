@@ -1,10 +1,7 @@
 package setruntime
 
 import (
-	"context"
-
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
-	"github.com/Zapharaos/brick-scanr-backend/internal/utils"
 	"github.com/google/uuid"
 )
 
@@ -13,7 +10,6 @@ type DataChangeReason uint8
 
 const (
 	DataTypeSet DataType = iota
-	DataTypeBricklinkDetails
 	DataTypeBricklinkBricks
 	DataTypePickabrickBricks
 )
@@ -27,26 +23,17 @@ const (
 )
 
 type dataChange struct {
-	Id        uuid.UUID
-	Type      DataType
-	Reason    DataChangeReason
-	Progress  Progress        // Only used when working with batches
-	Set       set.SetExternal // Optional field to send data without
-	PullCache bool            // Indicates whether the change requires pulling the latest data from cache
+	Id       uuid.UUID
+	Type     DataType
+	Reason   DataChangeReason
+	Progress Progress // Only used when working with batches
 }
 
 // handleDataChangeCreated handles the creation of data
 func (rs *RuntimeSet) handleDataChangeCreated(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
-		var s set.SetExternal
-		if change.PullCache {
-			rs.pullSetFromCache(change.Id)
-			s = rs.GetSet()
-		} else {
-			s = change.Set
-		}
-		rs.broadcastPacket(NewPacketSet(s, false))
+		rs.broadcastPacket(NewPacketSet(*rs.Read(), true))
 		break
 	default:
 		break
@@ -57,14 +44,7 @@ func (rs *RuntimeSet) handleDataChangeCreated(change dataChange) {
 func (rs *RuntimeSet) handleDataChangeUpdated(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
-		var s set.SetExternal
-		if change.PullCache {
-			rs.pullSetFromCache(change.Id)
-			s = rs.GetSet()
-		} else {
-			s = change.Set
-		}
-		rs.broadcastPacket(NewPacketSet(s, false))
+		rs.broadcastPacket(NewPacketSet(*rs.Read(), false))
 		break
 	default:
 		break
@@ -75,15 +55,7 @@ func (rs *RuntimeSet) handleDataChangeUpdated(change dataChange) {
 func (rs *RuntimeSet) handleDataChangeCompleted(change dataChange) {
 	switch change.Type {
 	case DataTypeSet:
-		var s set.SetExternal
-		if change.PullCache {
-			rs.pullSetFromCache(change.Id)
-			rs.calculateFinalData()
-			s = rs.GetSet()
-		} else {
-			s = change.Set
-		}
-		rs.broadcastPacket(NewPacketSet(s, true))
+		rs.broadcastPacket(NewPacketSet(*rs.Read(), true))
 		break
 	default:
 		break
@@ -92,13 +64,10 @@ func (rs *RuntimeSet) handleDataChangeCompleted(change dataChange) {
 
 // handleDataChangeFailed handles the data failure
 func (rs *RuntimeSet) handleDataChangeFailed(change dataChange) {
-	// Refresh set from cache to get the latest error details
-	rs.pullSetFromCache(change.Id)
-
 	// Determine the fatal error code and message based on the data type
 	var fatalPacket *PacketFatal
 
-	fetchError := rs.GetFetchError()
+	fetchError := rs.Read().FetchError
 	if fetchError != nil {
 		fatalPacket = NewPacketFatal(fetchError.Step, fetchError.Message)
 	} else {
@@ -116,15 +85,12 @@ func (rs *RuntimeSet) handleDataChangeProgress(change dataChange) {
 	switch change.Type {
 	case DataTypeBricklinkBricks, DataTypePickabrickBricks:
 		// Convert Items ([]any) to []set.Brick
-		bricks := make([]set.BrickSet, 0, len(change.Progress.Items))
+		bricks := make([]set.Brick, 0, len(change.Progress.Items))
 		for _, item := range change.Progress.Items {
-			if brick, ok := item.(set.BrickSet); ok {
+			if brick, ok := item.(set.Brick); ok {
 				bricks = append(bricks, brick)
 			}
 		}
-
-		// Store Bricks in RuntimeSet for new clients joining later
-		rs.AddBricks(bricks)
 
 		// Determine the batch status
 		var status BatchStatus
@@ -135,49 +101,11 @@ func (rs *RuntimeSet) handleDataChangeProgress(change dataChange) {
 		}
 
 		// Create and broadcast the inventory batch packet
-		packet := NewPacketInventoryBatch(bricks, &change.Progress, status)
-		rs.broadcastPacket(packet)
+		inventoryBatchPacket := NewPacketInventoryBatch(bricks, &change.Progress, status)
+		rs.broadcastPacket(inventoryBatchPacket)
 
 	default:
 		// Unknown data type for progress, ignore
 		return
 	}
-}
-
-// pullSetFromCache refreshes the set data from Redis into the runtime set instance
-func (rs *RuntimeSet) pullSetFromCache(setId uuid.UUID) {
-	cachedSet, err := set.GetRedisSet(context.Background(), setId)
-	if err != nil {
-		rs.logWarning("RuntimeSet.RefreshSet", err)
-		return
-	}
-
-	// Update the entire set atomically
-	rs.setMutex.Lock()
-	rs.set.Set = cachedSet
-	rs.setMutex.Unlock()
-}
-
-// calculateFinalData calculates and updates the final data for the runtime set
-func (rs *RuntimeSet) calculateFinalData() {
-
-	// Use runtime bricks and update the set's bricks before broadcasting
-	rs.set.Bricks = utils.MapValues(rs.bricks)
-
-	// Calculate total prices for bricks and count how many are missing prices
-	countMissingBrickPrices, sumTotalPriceCentAmount := rs.set.CalculateBricksTotalPrices()
-
-	// Determine the currency symbol to use for the total price
-	var currencySymbol string
-	price, ok := rs.set.Prices.GetPrice(rs.key.XLocale)
-	if ok && price != nil {
-		currencySymbol = price.CurrencyCode
-	} else {
-		// Default - should not happen as price should have been fetched before
-		currencySymbol = rs.key.XLocale.String()
-	}
-
-	// Update final data
-	rs.set.MissingParts = countMissingBrickPrices
-	rs.set.ApplyTotalPrice(sumTotalPriceCentAmount, currencySymbol)
 }

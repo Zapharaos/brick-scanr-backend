@@ -22,7 +22,8 @@ const (
 	BatchStatusPickabrickPrices   BatchStatus = "pickabrickPrices"
 )
 
-// packetSpec is a struct that contains all the possible packets, used for swagger doc and generation
+// packetSpec is a struct that contains all the possible packets
+// WARNING : used for swagger doc and generation
 type packetSpec struct {
 	Packet               packet               `json:"packet"`
 	PacketInit           PacketInit           `json:"packetInit"`
@@ -54,10 +55,10 @@ func (p *packet) ToJSON() ([]byte, error) {
 // PacketInit is a packet to initialize the set
 type PacketInit struct {
 	packet
-	Set set.SetExternal `json:"set"`
+	Set set.External `json:"set"`
 }
 
-func NewPacketInit(set set.SetExternal) *PacketInit {
+func NewPacketInit(set set.External) *PacketInit {
 	return &PacketInit{
 		packet: packet{
 			Type: PacketTypeInit,
@@ -99,13 +100,13 @@ func (p *PacketFatal) ToJSON() ([]byte, error) {
 
 type PacketSet struct {
 	packet
-	Set set.SetExternal `json:"set"`
+	Set set.External `json:"set"`
 }
 
 // NewPacketSet creates a new PacketSet
-func NewPacketSet(s set.SetExternal, bricks bool) *PacketSet {
+func NewPacketSet(s set.External, bricks bool) *PacketSet {
 	if !bricks {
-		s.Bricks = []set.BrickSet{}
+		s.Bricks = []set.Brick{}
 	}
 	return &PacketSet{
 		packet: packet{
@@ -123,13 +124,13 @@ func (p *PacketSet) ToJSON() ([]byte, error) {
 // PacketInventoryBatch is a packet to send a batch of Bricks
 type PacketInventoryBatch struct {
 	packet
-	Bricks         []set.BrickSet `json:"bricks"`
-	BricksProgress *Progress      `json:"bricksProgress"`
-	Status         BatchStatus    `json:"status"`
+	Bricks         []set.Brick `json:"bricks"`
+	BricksProgress *Progress   `json:"bricksProgress"`
+	Status         BatchStatus `json:"status"`
 }
 
 // NewPacketInventoryBatch creates a new PacketInventoryBatch
-func NewPacketInventoryBatch(bricks []set.BrickSet, progress *Progress, status BatchStatus) *PacketInventoryBatch {
+func NewPacketInventoryBatch(bricks []set.Brick, progress *Progress, status BatchStatus) *PacketInventoryBatch {
 	return &PacketInventoryBatch{
 		packet: packet{
 			Type: PacketTypeInventoryBatch,

@@ -40,17 +40,17 @@ func NewHandler(ctx context.Context) *Handler {
 }
 
 // RunSet runs a runtime set, if it is not already running
-func (h *Handler) RunSet(s set.SetExternal, xlocale language.Tag, opType OperationType) *RuntimeSet {
+func (h *Handler) RunSet(s set.External, xlocale language.Tag, opType OperationType) *RuntimeSet {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
-	key := NewRuntimeSetKey(s.Id, xlocale, opType)
+	key := NewRuntimeSetKey(s.ID, xlocale, opType)
 	keyStr := key.String()
 
 	// Check if a runtime set with this exact key already exists
 	if rs, ok := h.setsByKey[keyStr]; ok {
 		// Check if the runtime set is healthy (not failed)
-		if rs.GetFetchStatus() == set.FetchStatusFailed {
+		if rs.Read().FetchStatus == set.FetchStatusFailed {
 			// Runtime set has failed, force stop it and create a new one
 			zap.L().Info("Stopping failed runtime set to create new one",
 				zap.String("key", keyStr),
@@ -64,9 +64,6 @@ func (h *Handler) RunSet(s set.SetExternal, xlocale language.Tag, opType Operati
 			return rs
 		}
 	}
-
-	// Apply the xlocale to the set, so that it can be communicated to the client for consistency
-	s.XLocale = xlocale.String()
 
 	// Create a new runtime set
 	rs := NewRuntimeSet(s, key, RuntimeOptionsFromConfig(), h.wg, h.ErrorLogger)
@@ -114,7 +111,7 @@ func (h *Handler) FindRuntimeSetBySetId(setId uuid.UUID) []*RuntimeSet {
 
 	sets := make([]*RuntimeSet, 0)
 	for _, rs := range h.sets {
-		if rs.GetSetID() == setId {
+		if rs.Read().ID == setId {
 			sets = append(sets, rs)
 		}
 	}
@@ -141,23 +138,9 @@ func (h *Handler) RemoveRuntimeSet(key RuntimeSetKey) {
 func (h *Handler) PushChange(rsId, changedId uuid.UUID, dType DataType, reason DataChangeReason) {
 	if rs := h.GetRuntimeSet(rsId); rs != nil {
 		rs.PushChange(dataChange{
-			Id:        changedId,
-			Type:      dType,
-			Reason:    reason,
-			PullCache: true,
-		})
-	}
-}
-
-// PushChangeSet pushes a change with an associated data set to the runtime set, if it exists
-func (h *Handler) PushChangeSet(rsId, changedId uuid.UUID, dType DataType, reason DataChangeReason, set set.SetExternal) {
-	if rs := h.GetRuntimeSet(rsId); rs != nil {
-		rs.PushChange(dataChange{
-			Id:        changedId,
-			Type:      dType,
-			Reason:    reason,
-			Set:       set,
-			PullCache: false,
+			Id:     changedId,
+			Type:   dType,
+			Reason: reason,
 		})
 	}
 }

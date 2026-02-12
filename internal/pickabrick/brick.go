@@ -43,6 +43,7 @@ type Brick struct {
 	DesignID         string         `json:"designId"`
 	CollapseDesignID string         `json:"collapseDesignId"`
 	Name             string         `json:"name"`
+	ImageUrl         string         `json:"imageUrl"`
 	ColorHex         string         `json:"colorHex"`
 	ContrastColorHex string         `json:"contrastColorHex"`
 	Price            Price          `json:"price"`

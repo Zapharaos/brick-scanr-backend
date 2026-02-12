@@ -1,122 +1,64 @@
 package set
 
 import (
-	"errors"
-	"strings"
-	"time"
+	"sort"
 
-	"github.com/Zapharaos/brick-scanr-backend/internal/database"
-	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
-	"golang.org/x/text/language"
+	"github.com/Zapharaos/brick-scanr-backend/internal/brick"
+	"github.com/Zapharaos/brick-scanr-backend/internal/utils"
+	"github.com/google/uuid"
 )
 
-type BrickID string
-type DesignID string
-
+// Brick represents a Lego brick with all its core, inventory, and locale-specific information.
 type Brick struct {
-	// Local data
-	MainID *BrickID `json:"main_id"`
+	brick.Inventory
+	brick.Locale
 
-	// General data
-	IDs      []BrickID `json:"ids"`
-	DesignID DesignID  `json:"design_id"`
-	IsCustom bool      `json:"is_custom"`
-	Prices   PricePerTag
-
-	// Could be made locale specific, but not for now
-	Status        Status `json:"status"`
-	Name          string `json:"name"`
-	ImageURL      string `json:"image_url"`
-	PickabrickURL string `json:"pickabrick_url"`
-	Color         Color  `json:"color"`
+	// ID is used for tracking and referencing purposes during the fetching process and while communicating with clients
+	ID         uuid.UUID   `json:"id"`
+	TotalPrice utils.Price `json:"total_price"`
 }
 
-// GetBrickIDForRedis returns the appropriate BrickID to use as a Redis key
-func (b *Brick) GetBrickIDForRedis() (BrickID, error) {
-	// Determine the ID to use for Redis key
-	var keyID BrickID
-	if b.MainID != nil {
-		keyID = *b.MainID
-	} else if len(b.IDs) > 0 {
-		// No main ID: return the first non-empty (after trimming) ID in the list
-		for _, id := range b.IDs {
-			if strings.TrimSpace(string(id)) != "" {
-				keyID = id
-				break
-			}
-		}
-		// If no valid ID found in the slice, fall through to the error
-	}
-	if keyID == "" {
-		// No IDs at all - this shouldn't happen, but handle gracefully
-		return "", errors.New("brick has no valid ID")
-	}
-	return keyID, nil
+// NewBrick creates a new Brick instance by combining the provided Inventory and Locale information,
+// and calculates the total price based on the unit price and quantity.
+func NewBrick(inventory brick.Inventory, locale brick.Locale) Brick {
+	return NewBrickWithID(uuid.New(), inventory, locale)
 }
 
-// BuildPickabrickURL constructs the Pick-a-Brick URL for the Brick based on its ID and the given xlocale
-func (b *Brick) BuildPickabrickURL(xlocale language.Tag) {
-	var id string
-	if b.MainID != nil {
-		id = string(*b.MainID)
-	} else if len(b.IDs) > 0 {
-		id = string(b.IDs[0])
-	} else {
-		id = string(b.DesignID)
+// NewBrickWithID creates a new Brick instance with a specified ID by combining the provided Inventory and Locale information,
+// and calculates the total price based on the unit price and quantity.
+func NewBrickWithID(id uuid.UUID, inventory brick.Inventory, locale brick.Locale) Brick {
+	b := Brick{
+		ID:        id,
+		Inventory: inventory,
+		Locale:    locale,
 	}
-	b.PickabrickURL = "https://www.lego.com/" + xlocale.String() + "/pick-and-build/pick-a-brick?selectedElement=" + id
+	b.CalculateTotalPrice()
+	return b
 }
 
-// SetPrice sets the price for the given xlocale in the Brick's Prices map
-func (b *Brick) SetPrice(price Price, xlocale language.Tag) {
-	if b.Prices == nil {
-		b.Prices = make(map[language.Tag]*Price)
+// CalculateTotalPrice calculates the total price based on unit price and quantity
+func (b *Brick) CalculateTotalPrice() {
+	b.TotalPrice = utils.Price{
+		CentAmount:   b.Price.CentAmount * b.Quantity,
+		CurrencyCode: b.Price.CurrencyCode,
 	}
-	b.Prices[xlocale] = &price
 }
 
-// HasValidPrice checks if the Brick has a valid and up-to-date price for the given locale tag
-func (b *Brick) HasValidPrice(xlocale language.Tag) bool {
-	return HasValidPrice(b.Prices, xlocale, database.DB().Redis().TTLS.BrickPrice)
+// ResetDownToInventoryCore takes a slice of Bricks and returns a new slice where each Brick's Locale information is reset down to its Core information, effectively downgrading the Bricks to InventoryCores while keeping the inventory data intact.
+func (b *Brick) ResetDownToInventoryCore() {
+	// Maintain inventory data + core data + ID
+
+	// Downgrade the total price since it's irrelevant when cached, it will be recalculated anyway upon load
+	b.TotalPrice = utils.Price{}
+
+	// Locale down to core
+	locale := &b.Locale
+	locale.ResetDownToCore()
 }
 
-// HasLowerPrice compares the price of the current Brick with another Brick for the given xlocale
-// returning true if current has a valid price that is lower than the other, else false
-func (b *Brick) HasLowerPrice(b2 Brick, xlocale language.Tag) bool {
-	// First check if the current brick has a valid price for the xlocale
-	if b.HasValidPrice(xlocale) {
-		p1, _ := b.Prices.GetPrice(xlocale)
-		if !b2.HasValidPrice(xlocale) {
-			// If b2 doesn't have a valid price, we consider b1 as having a lower price
-			return true
-		}
-		p2, _ := b2.Prices.GetPrice(xlocale)
-		// Both have valid prices, compare them
-		return p1.IsLower(p2.CentAmount)
-	}
-	return false
-}
-
-// MapBrickFromPickabrick maps a Pickabrick Brick to an internal Brick representation, updating price and other fields
-func MapBrickFromPickabrick(brick Brick, brickID BrickID, pab pickabrick.Brick, xlocale language.Tag) Brick {
-	// Prepare fetched price
-	pbp := MapPriceFromPickabrick(pab.Price)
-	pbp.ItemID = string(brickID)
-	pbp.FetchedAt = time.Now().UnixMilli()
-
-	// Update brick with fetched price
-	if brick.Prices == nil {
-		brick.Prices = make(map[language.Tag]*Price)
-	}
-	brick.Prices[xlocale] = &pbp
-
-	// Update additional fields from Pick-a-Brick
-	brick.MainID = &brickID
-	brick.DesignID = DesignID(pab.DesignID)
-	brick.BuildPickabrickURL(xlocale)
-	brick.Status = MapPickabrickStatus(pab.Availability)
-	brick.Color = MapColorFromPickabrick(pab)
-	brick.Name = pab.Name
-
-	return brick
+// SortBricksByIndex sorts a slice of Bricks in-place based on their Index field in ascending order.
+func SortBricksByIndex(bricks []Brick) {
+	sort.Slice(bricks, func(i, j int) bool {
+		return bricks[i].Index < bricks[j].Index
+	})
 }

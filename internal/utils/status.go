@@ -1,4 +1,4 @@
-package set
+package utils
 
 import (
 	"github.com/Zapharaos/brick-scanr-backend/internal/lego"
