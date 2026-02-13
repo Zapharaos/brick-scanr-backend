@@ -56,6 +56,13 @@ func (sh *SetHandler) AddFinalBrickData(brick set.Brick) {
 	sh.set.AddFinalBrickData(brick)
 }
 
+// SetInventoryStatus safely updates the inventory status of the set
+func (sh *SetHandler) SetInventoryStatus(status set.FetchStatus) {
+	sh.mutex.Lock()
+	defer sh.mutex.Unlock()
+	sh.set.InventoryStatus = status
+}
+
 // SetFetchStatus safely updates the fetch status of the set
 func (sh *SetHandler) SetFetchStatus(status set.FetchStatus) {
 	sh.mutex.Lock()

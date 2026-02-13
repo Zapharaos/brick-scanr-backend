@@ -112,8 +112,46 @@ func (h *Handler) FetchFetchSetIncomplete(
 
 	// Check if set locale is missing or price is outdated
 	if missingLocale || missingSetPrice {
-		priceOnly := !missingLocale // Fetch more than price if locale is missing
+		priceOnly := !missingLocale // Fetch more all product details if locale is missing
 		h.fetchSetDetails(ctx, rs, lang, xlocale, priceOnly)
+	}
+
+	// Check if we have access to the inventory
+	if rs.ihAccess.IsValid() {
+
+		// TODO : can the inventory expire by then ?
+
+		// Listen to inventory updates from the worker that is processing the inventory
+		inventory := rs.ihAccess.Inventory.listen(func(batch Progress) {
+			// Handle the batch
+			h.batchHandlerListenProgress(rs, batch)
+			return
+		})
+
+		// After listening, receive the final inventory data and clear runtime inventory handler
+
+		// Update the set with the latest inventory data
+		set.SortBricksByIndex(inventory)
+		rs.set.SetBricks(inventory)
+
+		var finalBatch Progress
+		finalBatch.Total = len(inventory)
+		finalBatch.Done = len(inventory)
+
+		// Update the missing bricks in the runtime set based on the new inventory data
+		for _, b := range inventory {
+			if _, ok := rs.bricks.missing[b.ID]; !ok {
+				// This brick is not in the missing map, add it
+				rs.bricks.appendMissing(b)
+			}
+			finalBatch.AddItem(b)
+		}
+
+		// Send final inventory batch to clients
+		h.PushBatchProgress(rs.ID, DataTypeBricklinkBricks, finalBatch)
+
+		// We don't need the inventory handler anymore, reset it to avoid any potential misuse later on
+		rs.ihAccess.Reset()
 	}
 
 	// Fetch prices from Pick-a-Brick (sequential - depends on inventory)
@@ -155,7 +193,7 @@ func (h *Handler) fetchSetDetails(ctx context.Context, rs *RuntimeSet, lang lang
 		h.PushChange(rs.ID, setID, DataTypeSet, DataTypeUpdated)
 
 		// Detect a slug change that needs to be updated in Redis
-		if rs.Read().SlugDefault == "" && locale.Slug != "" && locale.Slug != rs.Read().SlugDefault {
+		if rs.Read().BricklinkSlug == "" && locale.Slug != "" && locale.Slug != rs.Read().BricklinkSlug {
 			err = set.RedisSetSetIDForSlug(ctx, locale, true)
 			if err != nil {
 				zap.L().Warn("Failed to cache slug to set ID mapping",
@@ -173,6 +211,12 @@ func (h *Handler) fetchSetDetails(ctx context.Context, rs *RuntimeSet, lang lang
 
 // fetchInventory fetches the inventory for a set from BrickLink using a worker pool
 func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag language.Tag) error {
+
+	// Mark inventory as fetching to update clients and avoid any potential concurrent fetches
+	rs.set.SetInventoryStatus(set.FetchStatusFetching)
+	rs.cacheSet(ctx, false)
+
+	// Fetch inventory from BrickLink
 	inventory, err := bricklink.C().FetchInventory(rs.Read().BricklinkID, rs.Read().BricklinkNumber, tag)
 	if err != nil {
 		// Failed to fetch inventory => FATAL
@@ -180,8 +224,11 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 		return err
 	}
 
+	// No items in inventory, we can mark inventory as complete and skip processing
 	inventorySize := len(inventory.RegularItems)
 	if inventorySize == 0 {
+		rs.set.SetInventoryStatus(set.FetchStatusCompleted)
+		rs.cacheSet(ctx, false)
 		return nil
 	}
 
@@ -274,8 +321,15 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 		return err
 	}
 
+	// Mark inventory fetching as complete to free the listeners and clear runtime inventory handler
+	IH().StopInventory(rs.ID)
+
+	// We don't need the inventory handler anymore, reset it to avoid any potential misuse later on
+	rs.ihAccess.Reset()
+
 	// Cache the processed items
-	rs.cacheSet(ctx)
+	rs.set.SetInventoryStatus(set.FetchStatusCompleted)
+	rs.cacheSet(ctx, true)
 
 	zap.L().Debug("Worker pool completed inventory processing",
 		zap.Int("item_count", inventorySize),
@@ -334,7 +388,7 @@ func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, lang language
 	}
 
 	// Cache the processed items
-	rs.cacheSet(ctx)
+	rs.cacheSet(ctx, true)
 
 	zap.L().Debug("Worker pool completed price fetching",
 		zap.Int("bricks_size", bricksSize),
@@ -529,10 +583,35 @@ func (h *Handler) batchHandlerBricksProgress(
 	// Send external set update to clients, without bricks
 	h.PushChange(rs.ID, rs.Read().ID, DataTypeSet, DataTypeUpdated)
 
+	// If we have access to the inventory as a writer
+	if dataType == DataTypeBricklinkBricks && rs.ihAccess.IsValid() && rs.ihAccess.IsWriter {
+		// Send batch to inventory potential listeners
+		rs.ihAccess.Inventory.write(*progress)
+	}
+
 	// Complete batch (resets items array for next batch)
 	progress.CompleteBatch()
 
 	return nil
+}
+
+// batchHandlerListenProgress is a simplified batch handler for inventory listening
+// it only updates the runtime set and sends progress to clients without caching or external set updates
+func (h *Handler) batchHandlerListenProgress(rs *RuntimeSet, progress Progress) {
+
+	// Update runtime set with current batch
+	for _, item := range progress.Items {
+		// Add brick to missing bricks in runtime set
+		if bp, ok := item.(set.Brick); ok {
+			rs.bricks.appendMissing(bp)
+		}
+		if bp, ok := item.(*set.Brick); ok && bp != nil {
+			rs.bricks.appendMissing(*bp)
+		}
+	}
+
+	// Send batch to frontend
+	h.PushBatchProgress(rs.ID, DataTypeBricklinkBricks, progress)
 }
 
 // handleFatalError handles fatal errors during set fetching

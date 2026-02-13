@@ -39,7 +39,7 @@ func (e *External) IncrementMissingParts() {
 // AddFinalBrickData adds the price of a final brick to the total price of the set and updates the missing parts count
 func (e *External) AddFinalBrickData(b Brick) {
 	// Only add brick data if it has a valid price
-	if !b.HasValidPrice() {
+	if !b.HasValidPrice() || b.Price.IsNotFound() {
 		return
 	}
 

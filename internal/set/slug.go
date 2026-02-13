@@ -40,7 +40,7 @@ func (c *Core) GenerateSlugDefault() {
 	}
 
 	// Handle name: normalize (remove diacritics), lower-case, replace non-alphanumeric chars with '-' and trim/collapse dashes
-	name := c.NameDefault
+	name := c.BricklinkName
 	// Normalize to NFD to separate diacritics, then drop them
 	name = norm.NFD.String(name)
 	var b strings.Builder
@@ -61,11 +61,11 @@ func (c *Core) GenerateSlugDefault() {
 
 	// Compose slug
 	if number != "" && name != "" {
-		c.SlugDefault = name + "-" + number
+		c.BricklinkSlug = name + "-" + number
 	} else if number != "" {
-		c.SlugDefault = number
+		c.BricklinkSlug = number
 	} else {
-		c.SlugDefault = name
+		c.BricklinkSlug = name
 	}
 }
 
@@ -79,7 +79,7 @@ func RedisBuildKeySlug(slug string) string {
 func RedisSetSetIDForSlug(ctx context.Context, set Locale, updateTTL bool) error {
 	slug := set.Slug
 	if slug == "" {
-		slug = set.SlugDefault
+		slug = set.BricklinkSlug
 	}
 
 	key := RedisBuildKeySlug(set.Slug)

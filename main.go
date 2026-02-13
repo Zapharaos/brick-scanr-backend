@@ -81,6 +81,7 @@ func main() {
 		zap.L().Fatal("Server shutdown failed", zap.Error(err))
 	}
 
+	setruntime.IH().Shutdown()
 	setHandler.Shutdown()
 
 	zap.L().Info("Server shutdown")

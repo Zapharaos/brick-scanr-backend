@@ -40,7 +40,7 @@ func NewHandler(ctx context.Context) *Handler {
 }
 
 // RunSet runs a runtime set, if it is not already running
-func (h *Handler) RunSet(s set.External, xlocale language.Tag, opType OperationType) *RuntimeSet {
+func (h *Handler) RunSet(s set.External, xlocale language.Tag, opType OperationType, ihAccess InventoryAccess) *RuntimeSet {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
@@ -66,7 +66,7 @@ func (h *Handler) RunSet(s set.External, xlocale language.Tag, opType OperationT
 	}
 
 	// Create a new runtime set
-	rs := NewRuntimeSet(s, key, RuntimeOptionsFromConfig(), h.wg, h.ErrorLogger)
+	rs := NewRuntimeSet(key, RuntimeOptionsFromConfig(), s, ihAccess, h.wg, h.ErrorLogger)
 
 	// Set the runtime set end callback
 	rs.onEnd = h.onRuntimeSetEnd
@@ -125,12 +125,27 @@ func (h *Handler) RemoveRuntimeSet(key RuntimeSetKey) {
 
 	keyStr := key.String()
 	if rs, ok := h.setsByKey[keyStr]; ok {
+		setID := rs.Read().ID
 		delete(h.sets, rs.ID)
 		delete(h.setsByKey, keyStr)
 		zap.L().Info("Removed runtime set",
 			zap.String("runtime_id", rs.ID.String()),
 			zap.String("key", keyStr),
 		)
+
+		// Check if there are any other runtime sets for the same setID
+		hasOtherRuntimeSets := false
+		for _, otherRs := range h.setsByKey {
+			if otherRs.Read().ID == setID {
+				hasOtherRuntimeSets = true
+				break
+			}
+		}
+
+		// If no other runtime sets exist for this setID, cleanup the inventory
+		if !hasOtherRuntimeSets {
+			IH().CleanupInventory(setID)
+		}
 	}
 }
 

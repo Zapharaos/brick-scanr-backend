@@ -261,7 +261,7 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 
 	case setruntime.CacheStatusFailed, setruntime.CacheStatusNeedsRefetch, setruntime.CacheStatusMissing:
 		// Need to start a new complete fetch
-		h.handleFetchSetComplete(w, r, setId, lang, xlocale)
+		h.handleFetchSetComplete(w, r, setId, cacheSet.InventoryAccess, lang, xlocale)
 		return
 
 	default:
@@ -291,14 +291,25 @@ func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Create websocket runtime for fetching
-	cache.Set.MissingParts = len(cache.MissingBricks)
-	rs := h.srh.RunSet(cache.Set, xlocale, setruntime.OpTypeIncomplete)
-
-	// Put cache analyze results into the runtime
-	rs.NewBricksHandler(cache.FinalBricks, cache.MissingBricks)
+	var rs *setruntime.RuntimeSet
 	missingLocale := cache.MissingLocale
 	missingSetPrice := cache.MissingPrice
+
+	// Check if we have a valid inventory access
+	ihValid := cache.InventoryAccess.IsValid()
+	if ihValid {
+		// We need to listen to the inventory changes before proceeding normally
+		rs = h.srh.RunSet(cache.Set, xlocale, setruntime.OpTypeIncomplete, cache.InventoryAccess)
+	} else {
+		// There isn't an inventory access, we can skip the inventory stuff and proceed normally
+
+		// Create websocket runtime for fetching
+		cache.Set.MissingParts = len(cache.MissingBricks)
+		rs = h.srh.RunSet(cache.Set, xlocale, setruntime.OpTypeIncomplete, setruntime.InventoryAccess{})
+
+		// Put cache analyze results into the runtime
+		rs.NewBricksHandler(cache.FinalBricks, cache.MissingBricks)
+	}
 
 	// Start goroutine to fetch missing bricks
 	go h.srh.FetchFetchSetIncomplete(
@@ -320,7 +331,7 @@ func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request
 }
 
 // handleFetchSetComplete handles the case where we need to perform a complete fetch
-func (h Handler) handleFetchSetComplete(w http.ResponseWriter, r *http.Request, setId uuid.UUID, lang, xlocale language.Tag) {
+func (h Handler) handleFetchSetComplete(w http.ResponseWriter, r *http.Request, setId uuid.UUID, ihAccess setruntime.InventoryAccess, lang, xlocale language.Tag) {
 	// Retrieve BrickLink set info from cache
 	// If there was any set locale data, we would have handled it in the incomplete flow, not here
 	cacheLocaleWithCore, _, err := set.RedisGetLocale(r.Context(), setId, xlocale, true)
@@ -335,8 +346,20 @@ func (h Handler) handleFetchSetComplete(w http.ResponseWriter, r *http.Request, 
 		Locale: cacheLocaleWithCore,
 	}
 
+	// Check the inventory access
+	if !ihAccess.IsValid() {
+		// No access yet, try to get one
+		ihAccess = setruntime.IH().Access(setId)
+	}
+
+	// If we still don't have a valid access or only as a reader, we cannot proceed with the complete fetch
+	if !ihAccess.IsValid() || !ihAccess.IsWriter {
+		render.Error(w, r, fmt.Errorf("unexpected internal error"), "Internal error")
+		return
+	}
+
 	// Create websocket
-	rs := h.srh.RunSet(se, xlocale, setruntime.OpTypeFull)
+	rs := h.srh.RunSet(se, xlocale, setruntime.OpTypeFull, ihAccess)
 
 	// Start processing in background
 	go h.srh.FetchSetComplete(

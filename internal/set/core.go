@@ -15,18 +15,21 @@ import (
 
 // Core represents the core information of a Lego set.
 type Core struct {
-	ID          uuid.UUID `json:"id"`
-	Number      string    `json:"number"`
-	NameDefault string    `json:"name_default"`
-	SlugDefault string    `json:"slug_default"`
+	ID           uuid.UUID `json:"id"`
+	Number       string    `json:"number"`
+	Parts        int       `json:"parts"`
+	ImageURL     string    `json:"image_url"`
+	YearReleased int       `json:"year_released"`
+
+	// Inventory information
+	Bricks          []Brick `json:"bricks"`
+	InventoryStatus FetchStatus
 
 	// Details from Bricklink
-	Parts           int     `json:"parts"`
-	ImageURL        string  `json:"image_url"`
-	YearReleased    int     `json:"year_released"`
-	BricklinkID     int     `json:"bricklink_id"`
-	BricklinkNumber string  `json:"bricklink_number"`
-	Bricks          []Brick `json:"bricks"`
+	BricklinkName   string `json:"bricklink_name"`
+	BricklinkSlug   string `json:"bricklink_slug"`
+	BricklinkID     int    `json:"bricklink_id"`
+	BricklinkNumber string `json:"bricklink_number"`
 }
 
 // SetBricks sets the Bricks for the Core, optionally sorting them by their Index field.

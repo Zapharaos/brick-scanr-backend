@@ -25,7 +25,7 @@ func NewCoreFromBricklinkSearchItem(bs bricklink.SearchItem) (Core, error) {
 	// Map to internal set representation
 	return Core{
 		ID:              setId,
-		NameDefault:     bs.StrItemName,
+		BricklinkName:   bs.StrItemName,
 		BricklinkID:     bs.IDItem,
 		BricklinkNumber: bs.StrItemNo,
 	}, nil

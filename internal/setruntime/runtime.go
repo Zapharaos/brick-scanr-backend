@@ -44,8 +44,9 @@ type RuntimeSet struct {
 	opt RuntimeOptions
 
 	// Core runtime data
-	set    SetHandler
-	bricks BricksHandler
+	set      SetHandler
+	bricks   BricksHandler
+	ihAccess InventoryAccess
 
 	// Client management
 	*clientHolder
@@ -62,20 +63,21 @@ type RuntimeSet struct {
 }
 
 // NewRuntimeSet creates a new runtime set
-func NewRuntimeSet(s set.External, key RuntimeSetKey, opt RuntimeOptions, wg *sync.WaitGroup, errorLogger *supervisor.AsyncErrorLogger) *RuntimeSet {
+func NewRuntimeSet(key RuntimeSetKey, opt RuntimeOptions, s set.External, ihAccess InventoryAccess, wg *sync.WaitGroup, errorLogger *supervisor.AsyncErrorLogger) *RuntimeSet {
 	rs := &RuntimeSet{
 		ID:           uuid.New(),
 		key:          key,
-		set:          newSetHandler(s),
-		errorLogger:  errorLogger,
 		opt:          opt,
+		set:          newSetHandler(s),
+		bricks:       newBricksHandler(),
+		ihAccess:     ihAccess,
 		clientHolder: newClientHolder(true),
 		register:     make(chan Client, opt.ClientChanCap),
 		unregister:   make(chan uuid.UUID, opt.ClientChanCap),
 		changeChan:   make(chan dataChange, opt.ChangeChanCap),
-		bricks:       newBricksHandler(),
 		done:         make(chan struct{}),
 		wg:           wg,
+		errorLogger:  errorLogger,
 	}
 
 	return rs
