@@ -176,8 +176,17 @@ func checkSetDataValidity(ctx context.Context, s set.Locale, setID uuid.UUID, xl
 	}
 	sExternal.MissingParts = len(s.Bricks)
 
-	// Check if set price is missing
-	setPriceMissing := !s.HasValidPrice()
+	setMissingLocale := false
+	setMissingPrice := false
+
+	// Check locale fetch status
+	if sExternal.Locale.FetchStatus != set.FetchStatusCompleted {
+		// If locale is not present or not fully fetched
+		setMissingLocale = true
+	} else if !sExternal.HasValidPrice() {
+		// If locale is present but price is not valid
+		setMissingPrice = true
+	}
 
 	// Prepare slices to hold full Brick data and those missing prices
 	bricksFinal := make([]set.Brick, 0)
@@ -186,7 +195,7 @@ func checkSetDataValidity(ctx context.Context, s set.Locale, setID uuid.UUID, xl
 	// For each brick in the set, retrieve full data from cache and check for missing prices
 	// This supposes that the set cache instance always has its bricks complete and valid, which is the case in theory
 	for _, bSet := range s.Bricks {
-		b, final := checkBrickCache(ctx, bSet, xlocale)
+		b, final := CheckBrickCache(ctx, bSet, xlocale, false)
 		if final {
 			bricksFinal = append(bricksFinal, b)
 			sExternal.AddFinalBrickData(b)
@@ -199,7 +208,7 @@ func checkSetDataValidity(ctx context.Context, s set.Locale, setID uuid.UUID, xl
 	sFinal := sExternal
 
 	// If all elements are present and up-to-date, return complete
-	if !setPriceMissing && len(bricksMissing) == 0 {
+	if !setMissingLocale && !setMissingPrice && len(bricksMissing) == 0 {
 		zap.L().Info("All Bricks have prices for requested xlocale",
 			zap.String("set_id", setID.String()),
 			zap.String("xlocale", xlocale.String()),
@@ -221,34 +230,26 @@ func checkSetDataValidity(ctx context.Context, s set.Locale, setID uuid.UUID, xl
 	zap.L().Info("Set cached data is incomplete",
 		zap.String("set_id", setID.String()),
 		zap.String("xlocale", xlocale.String()),
-		zap.Bool("missing_set_price", setPriceMissing),
+		zap.Bool("missing_locale", setMissingLocale),
+		zap.Bool("missing_price", setMissingPrice),
 		zap.Int("missing_bricks", len(bricksMissing)),
 	)
 
 	return &CacheSet{
 		Status:        CacheStatusIncomplete,
 		Set:           sFinal,
-		MissingPrice:  setPriceMissing,
+		MissingLocale: setMissingLocale,
+		MissingPrice:  setMissingPrice,
 		MissingBricks: bricksMissing,
 		FinalBricks:   bricksFinal,
 	}, nil
 }
 
-// checkBrickCache checks the cache for a given Brick and returns the updated Brick and whether it has valid cached data
-func checkBrickCache(ctx context.Context, bSet set.Brick, tag language.Tag) (set.Brick, bool) {
+// CheckBrickCache checks the cache for a given Brick and returns the updated Brick and whether it has valid cached data
+func CheckBrickCache(ctx context.Context, bSet set.Brick, tag language.Tag, allowOutdated bool) (set.Brick, bool) {
 	// When applying locales from cache, we might overwrite the elementIDs slice
 	// To avoid loosing data, we reset it to the original slice
 	originalElementIDs := bSet.Locale.ElementIDs
-
-	// If the brick was correctly cached in the inventory, it should have a valid or not-found cached brick
-	bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, *bSet.ElementID, tag, true)
-	if valid || notFound {
-		// Brick has valid price in cache, apply its locale data and add to final
-		// Note: if notFound, we could check all ElementID's to be 100% sure, but it should be useless if cached correctly
-		bSet = set.NewBrickWithID(bSet.ID, bSet.Inventory, bRedis)
-		bSet.SetElementIDs(originalElementIDs) // Reset to original slice to avoid losing data
-		return bSet, true
-	}
 
 	var firstNotFoundLocale *brick.Locale
 	var validLocale bool
@@ -256,7 +257,7 @@ func checkBrickCache(ctx context.Context, bSet set.Brick, tag language.Tag) (set
 	// The main ElementID isn't 100% valid, process over the available ElementIDs and decide afterward
 	for _, elementID := range bSet.ElementIDs {
 		// Try to find in cache first
-		bRedis, valid, notFound = bSet.Locale.LoadFromRedis(ctx, elementID, tag, true)
+		bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, elementID, tag, allowOutdated, true)
 		if notFound && firstNotFoundLocale == nil {
 			// Brick Locale cached with not-found price
 			// We can consider this brick as up-to-date with a not-found price

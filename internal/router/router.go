@@ -71,7 +71,8 @@ func New(setHandler *setruntime.Handler) *Router {
 			)).Post("/details/{id}", router.handler.FetchSetDetails)
 			r.Get("/details/ws/{id}", router.handler.SetDetailsWebSocket)
 
-			// todo : ISSUE #7 - Set scan export
+			// Export
+			r.Post("/export/{id}", router.handler.ExportSet)
 		})
 	})
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
 	"github.com/Zapharaos/brick-scanr-backend/internal/database"
@@ -13,6 +14,8 @@ import (
 	"github.com/Zapharaos/brick-scanr-backend/internal/redis"
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
 	"github.com/Zapharaos/brick-scanr-backend/internal/setruntime"
+	"github.com/Zapharaos/go-spit"
+	"github.com/Zapharaos/lingo"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -199,7 +202,7 @@ func handleSearchResultBricklinkSet(ctx context.Context, bsi bricklink.SearchIte
 //	@Tags			Set
 //	@Accept			json
 //	@Produce		json
-//	@Param			id			path		string						true	"Item ID (from search results)"
+//	@Param			id			path		string					true	"SetID or slug"
 //	@Security		Bearer
 //	@Success		202	{object}	set.DetailsResponse				"Job created or data available"
 //	@Failure		400	{object}	render.ErrorResponse			"Bad Request"
@@ -424,4 +427,98 @@ func (h Handler) SetDetailsWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Create and register client
 	setruntime.NewClient(rs, conn, clientId)
+}
+
+// ExportSet godoc
+//
+//	@Id				ExportSet
+//
+//	@Summary		Export set
+//	@Description	Exports set
+//	@Tags			Set
+//	@Accept			json
+//	@Produce		octet-stream
+//	@Param			id			path	string			true	"SetID or slug"
+//	@Security		Bearer
+//	@Success		200	{file}		result					file
+//	@Failure		400	{object}	render.ErrorResponse	"Bad Request"
+//	@Failure		401	{string}	string					"Permission denied"
+//	@Failure		500	{object}	render.ErrorResponse	"Internal Server Error"
+//	@Router			/api/v1/set/export/{id} [post]
+func (h Handler) ExportSet(w http.ResponseWriter, r *http.Request) {
+	setId, ok := ParseParamUUIDSoft(r, "id")
+	if !ok {
+		// Param is not a UUID, might be a slug - try to resolve
+		slug := chi.URLParam(r, "id")
+		id, err := set.RedisGetSetIDBySlug(r.Context(), slug)
+		if err != nil {
+			// Slug not found either - return 404
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		setId = id // resolved UUID from slug
+	}
+
+	// Extract xlocale from context
+	xlocale := GetXLocaleFromContext(r)
+
+	// Retrieve set locale from cache
+	sLocale, ok, err := set.RedisGetLocale(r.Context(), setId, xlocale, true)
+	if err != nil || !ok {
+		render.NotFound(w, r, err)
+		return
+	}
+
+	// Check if the set data is complete enough for export
+	if sLocale.InventoryStatus != set.FetchStatusCompleted && sLocale.FetchStatus != set.FetchStatusCompleted {
+		render.Error(w, r, fmt.Errorf("set data is not fully available yet"), "Set data is not fully available yet")
+	}
+
+	// For each brick in the set, retrieve full data from cache, even if outdated
+	for i, bSet := range sLocale.Bricks {
+		b, _ := setruntime.CheckBrickCache(r.Context(), bSet, xlocale, true)
+		sLocale.Bricks[i] = b
+	}
+
+	// Get xlocale translations localizer
+	localizer, _, err := lingo.GetLocalizer(xlocale)
+	if err != nil {
+		zap.L().Error("Failed to get localizer", zap.Error(err))
+		render.Error(w, r, err, "Get localizer")
+		return
+	}
+
+	// Generate export table
+	startTime := time.Now()
+	table := set.ExportBuildTable(sLocale, localizer, xlocale)
+
+	zap.L().Info("Set export table generated",
+		zap.String("setID", sLocale.ID.String()),
+		zap.String("slug", sLocale.GetSlug()),
+		zap.Duration("duration", time.Since(startTime)),
+	)
+
+	// File variables
+	fileParams := spit.FileWriteParams{
+		Filename:    sLocale.GetSlug(),
+		UseTempFile: true,
+	}
+	var fileResult *spit.FileWriteResult
+
+	// Export to XLSX
+	table.WriteHeader = true
+	sheetName := lingo.MustTranslate(localizer, lingo.NewMessage("set.export.sheet"))
+	spreadsheet := spit.NewSpreadsheetExcelize(sheetName, table)
+	fileResult, err = spit.ExportXLSX(spreadsheet, fileParams)
+	if err != nil {
+		render.Error(w, r, err, "Generate XLSX export file")
+		return
+	}
+
+	defer func(fileResult *spit.FileWriteResult) {
+		_ = fileResult.RemoveFile()
+	}(fileResult)
+
+	// Stream the file to the client
+	render.StreamFile(fileResult.Filepath, fileResult.Filename, w, r)
 }

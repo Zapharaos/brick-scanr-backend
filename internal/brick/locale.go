@@ -18,14 +18,6 @@ type Locale struct {
 	Color         Color        `json:"color"`
 }
 
-// IsEmptyExceptCore checks if all fields of the Locale are empty or zero values except for the Core information
-func (l *Locale) IsEmptyExceptCore() bool {
-	return !l.HasValidPrice() &&
-		l.Status == utils.StatusUnknown &&
-		l.PickabrickURL == "" &&
-		l.Color.IsEmpty()
-}
-
 // ResetDownToCore resets the Locale fields to their zero values, keeping only the Core information intact
 func (l *Locale) ResetDownToCore() {
 	l.Price = utils.Price{}
@@ -73,25 +65,40 @@ func (l *Locale) HasLowerPrice(l2 Locale) bool {
 }
 
 // LoadFromRedis attempts to update the Locale with data from the cache for the given ElementID and language tag.
-func (l *Locale) LoadFromRedis(ctx context.Context, id ElementID, tag language.Tag, mustLower bool) (Locale, bool, bool) {
+func (l *Locale) LoadFromRedis(ctx context.Context, id ElementID, tag language.Tag, allowOutdated, mustLower bool) (Locale, bool, bool) {
 	// Check cache first for this specific brick ID
 	if bCache, err := RedisGet(ctx, id, tag); err == nil {
 
-		var valid, notFound bool
-
 		// Check if it has a valid cached not-found entry
-		if bCache.Price.IsNotFound() && !bCache.HasOutdatedPrice() {
-			notFound = true
+		if bCache.Price.IsNotFound() {
+
+			// Price is not outdated, mark as not-found valid entry
+			if !bCache.HasOutdatedPrice() {
+				return bCache, false, true
+			}
+
+			// Price is outdated, but we allow outdated entries, mark as not-found valid entry
+			if allowOutdated {
+				return bCache, false, true
+			}
+
+			// Price is outdated and we don't allow outdated entries
 		}
 
-		// Check if this brick ID has a valid price that is lower than the current price (if any)
-		if bCache.HasValidPrice() && bCache.HasLowerPrice(*l) {
-			valid = true
-		}
+		// We allow outdated entries, the price is valid (i.e. not zero)
+		// OR
+		// We don't allow outdated entries, the price is valid (i.e. not zero and not outdated)
+		if (allowOutdated && !bCache.Price.IsZero()) ||
+			(!allowOutdated && bCache.HasValidPrice()) {
+			// We don't require the cached price to be lower, mark as valid entry
+			if !mustLower {
+				return bCache, true, false
+			}
 
-		// If applicable, update fields with data from cache
-		if valid || notFound {
-			return bCache, valid, notFound
+			// The cached price is lower than the current price, mark as valid entry
+			if bCache.HasLowerPrice(*l) {
+				return bCache, true, false
+			}
 		}
 	}
 	return *l, false, false

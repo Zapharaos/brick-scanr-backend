@@ -263,7 +263,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 		for _, id := range originalElementIDs {
 
 			// Try to find in cache first
-			bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, id, tag, true)
+			bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, id, tag, false, true)
 			if notFound && firstNotFoundLocale == nil {
 				// Brick Locale cached with not-found price
 				// We can consider this brick as up-to-date with a not-found price
@@ -418,7 +418,7 @@ func (h *Handler) workerHandlerBrickPrice(
 	for _, elementID := range originalElementIDs {
 
 		// Try to find in cache first
-		bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, elementID, xlocale, true)
+		bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, elementID, xlocale, false, true)
 		if notFound && firstNotFoundLocale == nil {
 			// Brick Locale cached with not-found price
 			// We can consider this brick as up-to-date with a not-found price

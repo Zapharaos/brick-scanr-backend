@@ -16,6 +16,14 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+// GetSlug returns the slug for the set
+func (l *Locale) GetSlug() string {
+	if l.Slug != "" {
+		return l.Slug
+	}
+	return l.BricklinkSlug
+}
+
 // GenerateSlugDefault creates a URL-friendly slug for the set based on its name and number, with normalization and fallback logic
 func (c *Core) GenerateSlugDefault() {
 	var number string
