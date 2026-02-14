@@ -22,8 +22,8 @@ type Core struct {
 	YearReleased int       `json:"year_released"`
 
 	// Inventory information
-	Bricks          []Brick `json:"bricks"`
-	InventoryStatus FetchStatus
+	Bricks          []Brick     `json:"bricks"`
+	InventoryStatus FetchStatus `json:"inventory_status"`
 
 	// Details from Bricklink
 	BricklinkName   string `json:"bricklink_name"`

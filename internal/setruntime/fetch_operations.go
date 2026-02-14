@@ -60,7 +60,7 @@ func (h *Handler) FetchSetComplete(
 	}
 
 	// Fetch prices from Pick-a-Brick (sequential - depends on inventory)
-	if err := h.fetchBricks(ctx, rs, lang, xlocale); err != nil {
+	if err := h.fetchBricks(ctx, rs, lang, xlocale, false); err != nil {
 		return // Error already handled
 	}
 
@@ -119,8 +119,6 @@ func (h *Handler) FetchFetchSetIncomplete(
 	// Check if we have access to the inventory
 	if rs.ihAccess.IsValid() {
 
-		// TODO : can the inventory expire by then ?
-
 		// Listen to inventory updates from the worker that is processing the inventory
 		inventory := rs.ihAccess.Inventory.listen(func(batch Progress) {
 			// Handle the batch
@@ -155,7 +153,7 @@ func (h *Handler) FetchFetchSetIncomplete(
 	}
 
 	// Fetch prices from Pick-a-Brick (sequential - depends on inventory)
-	if err := h.fetchBricks(ctx, rs, lang, xlocale); err != nil {
+	if err := h.fetchBricks(ctx, rs, lang, xlocale, true); err != nil {
 		return // Error already handled
 	}
 
@@ -322,7 +320,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 	}
 
 	// Mark inventory fetching as complete to free the listeners and clear runtime inventory handler
-	IH().StopInventory(rs.ID)
+	IH().StopInventory(rs.Read().ID)
 
 	// We don't need the inventory handler anymore, reset it to avoid any potential misuse later on
 	rs.ihAccess.Reset()
@@ -340,7 +338,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 }
 
 // fetchBricks fetches prices for all Bricks in a set from Pick-a-Brick using a worker pool
-func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, lang language.Tag, xlocale language.Tag) error {
+func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, lang language.Tag, xlocale language.Tag, skipFinalCaching bool) error {
 	// Calculate total bricks
 	bricksSize := len(rs.bricks.missing)
 	if bricksSize == 0 {
@@ -387,8 +385,14 @@ func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, lang language
 		return err
 	}
 
-	// Cache the processed items
-	rs.cacheSet(ctx, true)
+	if !skipFinalCaching {
+		// TODO : investigate why this is a fix
+		// problem was that when sharing inventory fetching for same set but different locales,
+		// when reloading the page it has missing bricks somehow, with some having centamount 0
+
+		// Cache the processed items
+		rs.cacheSet(ctx, true)
+	}
 
 	zap.L().Debug("Worker pool completed price fetching",
 		zap.Int("bricks_size", bricksSize),
@@ -608,10 +612,16 @@ func (h *Handler) batchHandlerListenProgress(rs *RuntimeSet, progress Progress) 
 		if bp, ok := item.(*set.Brick); ok && bp != nil {
 			rs.bricks.appendMissing(*bp)
 		}
+
+		// Update external set data
+		rs.set.IncrementMissingParts()
 	}
 
 	// Send batch to frontend
 	h.PushBatchProgress(rs.ID, DataTypeBricklinkBricks, progress)
+
+	// Send external set update to clients, without bricks
+	h.PushChange(rs.ID, rs.Read().ID, DataTypeSet, DataTypeUpdated)
 }
 
 // handleFatalError handles fatal errors during set fetching

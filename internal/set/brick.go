@@ -41,6 +41,8 @@ func (b *Brick) CalculateTotalPrice() {
 	b.TotalPrice = utils.Price{
 		CentAmount:   b.Price.CentAmount * b.Quantity,
 		CurrencyCode: b.Price.CurrencyCode,
+		FetchedAt:    b.Price.FetchedAt,
+		ItemID:       b.Price.ItemID,
 	}
 }
 

@@ -109,11 +109,24 @@ func (h *Handler) GetCacheSet(ctx context.Context, setID uuid.UUID, xlocale lang
 					InventoryAccess: ihAccess,
 				}, nil
 			}
+
 			// Caller is a reader/listener, it will join the ongoing inventory fetch and wait for it to complete
+
+			// Even if the inventory is still being fetched, we need the core data for the incomplete flow
+			sCore, err := set.RedisGetCore(ctx, setID)
+			if err != nil {
+				return &CacheSet{Status: CacheStatusMissing}, nil
+			}
+
 			return &CacheSet{
 				Status:          CacheStatusIncomplete,
 				InventoryAccess: ihAccess,
 				MissingLocale:   true,
+				Set: set.External{
+					Locale: set.Locale{
+						Core: sCore,
+					},
+				},
 			}, nil
 		}
 
