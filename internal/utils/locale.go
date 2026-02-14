@@ -9,7 +9,7 @@ import (
 var languageTag language.Tag
 
 func InitLocale() {
-	locale := viper.GetString("default_locale")
+	locale := viper.GetString("translations.default_locale")
 	if locale != "" {
 		tag, err := language.Parse(locale)
 		if err != nil {

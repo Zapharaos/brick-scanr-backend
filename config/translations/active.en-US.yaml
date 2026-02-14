@@ -1,0 +1,20 @@
+set:
+  export:
+    sheet: "Set"
+
+    columns:
+      index: "Index"
+      color: "Color"
+      name: "Name"
+      element: "Element"
+      design: "Design"
+      quantity: "Quantity"
+      price-unit: "Unit price"
+      price-total: "Total price"
+      url: "Lego.com"
+
+status:
+  available: "Available"
+  label: "Status"
+  out-of-stock: "Out of Stock"
+  unknown: "Unknow"

@@ -102,9 +102,21 @@ logger:
 # Default value: "Europe/Paris"
 timezone: 'Europe/Paris'
 
-# Specify the locale (BCP 47 language.Tag format)
-# Default value: "en-US"
-default_locale: 'en-US'
+# Translations configuration
+translations:
+
+  # Specify the locale (BCP 47 language.Tag format)
+  # Default value: "en-US"
+  default_locale: 'en-US'
+
+  # Specify the path to the translations directory
+  # Default value: "config/translations"
+  config_path: 'config/translations'
+
+  # Specify the prefixes for the translation files
+  # Default value: ["active"]
+  file_prefixes:
+    - "active"
 
 # CORS configuration
 cors:
