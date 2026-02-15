@@ -20,7 +20,7 @@ type Price struct {
 
 // IsZero checks if the price is zero or not found
 func (p *Price) IsZero() bool {
-	return p == nil || (p.CentAmount == 0 && p.CurrencyCode == "" && p.FetchedAt == 0 && !p.NotFound)
+	return p == nil || (p.CentAmount == 0 && !p.NotFound)
 }
 
 // IsNotFound checks if the price is found

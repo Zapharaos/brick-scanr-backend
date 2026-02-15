@@ -1,6 +1,7 @@
 package bricklink
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,12 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/net/html"
 	"golang.org/x/text/language"
+)
+
+// Error types
+var (
+	// ErrInventoryNotFound indicates that the inventory was not found in Bricklink API
+	ErrInventoryNotFound = errors.New("inventory not found in bricklink api")
 )
 
 // FetchInventory fetches the inventory data for a given set number

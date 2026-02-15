@@ -55,7 +55,6 @@ func ExportBuildTable(set Locale, localizer interface{}, tag language.Tag) *spit
 		case utils.StatusAvailable:
 			statusKey = "status.available"
 			break
-		case utils.StatusUnknown:
 		default:
 			statusKey = "status.unknown"
 			break

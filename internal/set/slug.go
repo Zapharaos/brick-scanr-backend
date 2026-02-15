@@ -90,7 +90,7 @@ func RedisSetSetIDForSlug(ctx context.Context, set Locale, updateTTL bool) error
 		slug = set.BricklinkSlug
 	}
 
-	key := RedisBuildKeySlug(set.Slug)
+	key := RedisBuildKeySlug(slug)
 
 	// Marshal set to JSON
 	setIdJSON, err := json.Marshal(set.ID)

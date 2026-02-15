@@ -22,6 +22,12 @@ import (
 	"golang.org/x/text/language"
 )
 
+// TODO : 21039 has duplicates for en-US
+// Black Tile 1 x 8 with 'Shanghai' Pattern // Element: Part Color Code Missing // Design: 4162pb181
+// TODO : duplicate not appearing for fr-FR on first load
+// the cache reload considers one price missing and refetches it, and then it duplicate part appears
+// TODO : on reload, initial missing parts count is wrong as well
+
 // SearchSets godoc
 //
 //	@Id				SearchSets

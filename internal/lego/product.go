@@ -97,6 +97,15 @@ func (c *Client) FetchProductDetails(slug string, lang, xlocale language.Tag) (*
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
+	// Check if the response contains valid product data
+	// LEGO API may return 200 OK with empty fields when product is not found
+	if response.Data.Product.ProductCode == "" && response.Data.Product.ID == "" {
+		zap.L().Warn("LEGO API returned empty product data",
+			zap.String("slug", slug),
+			zap.String("xlocale", xlocale.String()))
+		return nil, ErrProductNotFound
+	}
+
 	zap.L().Info("Successfully fetched LEGO product details",
 		zap.String("slug", slug),
 		zap.String("product_code", response.Data.Product.ProductCode),

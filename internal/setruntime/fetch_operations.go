@@ -55,13 +55,17 @@ func (h *Handler) FetchSetComplete(
 	}
 
 	// Fetch inventory from BrickLink (sequential)
-	if err := h.fetchInventory(ctx, rs, lang); err != nil {
+	ok, err := h.fetchInventory(ctx, rs, lang)
+	if err != nil {
 		return // Error already handled
 	}
 
-	// Fetch prices from Pick-a-Brick (sequential - depends on inventory)
-	if err := h.fetchBricks(ctx, rs, lang, xlocale, false); err != nil {
-		return // Error already handled
+	// Fetch bricks only if an inventory was found
+	if ok {
+		// Fetch prices from Pick-a-Brick (sequential - depends on inventory)
+		if err = h.fetchBricks(ctx, rs, lang, xlocale, false); err != nil {
+			return // Error already handled
+		}
 	}
 
 	// Mark set fetch completed, send final data to make sure clients have everything
@@ -69,7 +73,7 @@ func (h *Handler) FetchSetComplete(
 	h.PushChange(rs.ID, setID, DataTypeSet, DataTypeCompleted)
 
 	// Update the set locale in redis
-	err := set.RedisSetLocale(ctx, rs.Read().Locale, xlocale, false, true)
+	err = set.RedisSetLocale(ctx, rs.Read().Locale, xlocale, false, true)
 	if err != nil {
 		h.logWarning(setID, "Redis.SetLocale", err)
 		zap.L().Warn("Failed to update set locale in cache after finishing the complete set fetch",
@@ -208,7 +212,7 @@ func (h *Handler) fetchSetDetails(ctx context.Context, rs *RuntimeSet, lang lang
 }
 
 // fetchInventory fetches the inventory for a set from BrickLink using a worker pool
-func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag language.Tag) error {
+func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag language.Tag) (bool, error) {
 
 	// Mark inventory as fetching to update clients and avoid any potential concurrent fetches
 	rs.set.SetInventoryStatus(set.FetchStatusFetching)
@@ -217,9 +221,16 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 	// Fetch inventory from BrickLink
 	inventory, err := bricklink.C().FetchInventory(rs.Read().BricklinkID, rs.Read().BricklinkNumber, tag)
 	if err != nil {
+		// Check if it's a not-found error
+		if errors.Is(err, bricklink.ErrInventoryNotFound) {
+			rs.set.SetInventoryStatus(set.FetchStatusCompleted)
+			rs.cacheSet(ctx, false)
+			return false, nil
+		}
+
 		// Failed to fetch inventory => FATAL
 		handleFatalError(h, rs, set.FetchErrorFetchInventory, DataTypeBricklinkBricks, err, "Failed to fetch inventory from BrickLink")
-		return err
+		return false, err
 	}
 
 	// No items in inventory, we can mark inventory as complete and skip processing
@@ -227,7 +238,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 	if inventorySize == 0 {
 		rs.set.SetInventoryStatus(set.FetchStatusCompleted)
 		rs.cacheSet(ctx, false)
-		return nil
+		return false, nil
 	}
 
 	// Create optimal config based on item count
@@ -316,7 +327,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 	// Process all inventory items
 	if err = pool.Process(inventory.RegularItems); err != nil {
 		handleFatalError(h, rs, set.FetchErrorBatchCache, DataTypeSet, err, "Failed to process inventory with worker pool")
-		return err
+		return false, err
 	}
 
 	// Mark inventory fetching as complete to free the listeners and clear runtime inventory handler
@@ -334,7 +345,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 		zap.Int("bricks_processed", len(rs.Read().Bricks)),
 	)
 
-	return nil
+	return true, nil
 }
 
 // fetchBricks fetches prices for all Bricks in a set from Pick-a-Brick using a worker pool

@@ -165,11 +165,6 @@ func checkSetDataValidity(ctx context.Context, s set.Locale, setID uuid.UUID, xl
 		zap.String("xlocale", xlocale.String()),
 	)
 
-	// If there are no bricks in the cached set, it means the data is stale or incomplete, needs refetch
-	if len(s.Bricks) == 0 {
-		return &CacheSet{Status: CacheStatusNeedsRefetch}, nil
-	}
-
 	// Set up the cache response
 	sExternal := set.External{
 		Locale: s,
