@@ -165,6 +165,12 @@ rate_limit:
     requests: 10
     window: 60
 
+  # Brick details endpoint
+  # Default value: 10 requests per 60 seconds
+  brick_details:
+    requests: 10
+    window: 30
+
 # Websockets
 websocket:
 

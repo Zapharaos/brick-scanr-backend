@@ -57,8 +57,9 @@ func (h *Handler) GetCacheSet(ctx context.Context, setID uuid.UUID, xlocale lang
 					zap.String("xlocale", xlocale.String()),
 				)
 				return &CacheSet{
-					Status: CacheStatusFetching,
-					Set:    *rs.Read(),
+					Status:       CacheStatusFetching,
+					Set:          *rs.Read(),
+					RuntimeSetID: rs.ID,
 				}, nil
 			case set.FetchStatusCompleted:
 				// Data already fetched and cached by this runtime set
@@ -190,6 +191,14 @@ func checkSetDataValidity(ctx context.Context, s set.Locale, setID uuid.UUID, xl
 	// For each brick in the set, retrieve full data from cache and check for missing prices
 	// This supposes that the set cache instance always has its bricks complete and valid, which is the case in theory
 	for _, bSet := range s.Bricks {
+
+		// If the brick is custom, we consider it as complete since we don't fetch prices for custom bricks
+		if bSet.IsCustom {
+			bricksFinal = append(bricksFinal, bSet)
+			continue
+		}
+
+		// Check the cache for this brick and get the most up-to-date data available
 		b, final := CheckBrickCache(ctx, bSet, xlocale, false)
 		if final {
 			bricksFinal = append(bricksFinal, b)

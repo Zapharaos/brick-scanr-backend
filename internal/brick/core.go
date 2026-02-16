@@ -21,6 +21,8 @@ type Core struct {
 	ImageURL   string      `json:"image_url"`
 }
 
+// TODO : bricklinkURL ? bricklinkColor ? in Core or Locale ?
+
 // GetID returns the appropriate ElementID to use
 func (c *Core) GetID() (ElementID, error) {
 	// Determine the ID
@@ -47,4 +49,9 @@ func (c *Core) GetID() (ElementID, error) {
 // SetElementIDs sets the ElementIDs slice
 func (c *Core) SetElementIDs(ids []ElementID) {
 	c.ElementIDs = ids
+}
+
+// Copy creates a copy of the Core struct
+func (c *Core) Copy() Core {
+	return *c
 }

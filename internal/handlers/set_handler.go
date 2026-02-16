@@ -2,16 +2,11 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
-	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
-	"github.com/Zapharaos/brick-scanr-backend/internal/database"
 	"github.com/Zapharaos/brick-scanr-backend/internal/handlers/render"
-	"github.com/Zapharaos/brick-scanr-backend/internal/redis"
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
 	"github.com/Zapharaos/brick-scanr-backend/internal/setruntime"
 	"github.com/Zapharaos/go-spit"
@@ -21,182 +16,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/text/language"
 )
-
-// TODO : 21039 has duplicates for en-US
-// Black Tile 1 x 8 with 'Shanghai' Pattern // Element: Part Color Code Missing // Design: 4162pb181
-// TODO : duplicate not appearing for fr-FR on first load
-// the cache reload considers one price missing and refetches it, and then it duplicate part appears
-// TODO : on reload, initial missing parts count is wrong as well
-
-// SearchSets godoc
-//
-//	@Id				SearchSets
-//	@Summary		Search for LEGO sets
-//	@Description	Search for LEGO sets on BrickLink by set number or name.
-//	@Tags			Set
-//	@Produce		json
-//	@Param			query	path		string						true	"Search query (set number or name)"
-//	@Security		Bearer
-//	@Success		200	{array}		set.External				"List of matching sets"
-//	@Failure		400	{object}	render.ErrorResponse		"Bad Request"
-//	@Failure		500	{object}	render.ErrorResponse		"Internal Server Error"
-//	@Router			/api/v1/set/search/{query} [get]
-func SearchSets(w http.ResponseWriter, r *http.Request) {
-	query := chi.URLParam(r, "query")
-
-	zap.L().Info("SearchSets endpoint called",
-		zap.String("query", query),
-		zap.String("remote_addr", r.RemoteAddr),
-	)
-
-	if query == "" {
-		zap.L().Warn("SearchSets called with empty query")
-		render.BadRequest(w, r, fmt.Errorf("query parameter is required"))
-		return
-	}
-
-	// Extract language + xlocale from context
-	lang := GetLanguageFromContext(r)
-	xlocale := GetXLocaleFromContext(r)
-	// TODO : ISSUE #5 - Search Brick
-
-	// Execute search on BrickLink
-	bricklinkSets, err := bricklink.C().SearchSets(query, lang)
-	if err != nil {
-		zap.L().Error("Failed to search sets",
-			zap.Error(err),
-			zap.String("query", query),
-		)
-		render.Error(w, r, err, "Failed to search BrickLink")
-		return
-	}
-
-	// Process each result : check cache, map to internal struct, fetch details if needed, prepare external representation
-	sets := make([]set.Locale, 0, len(bricklinkSets))
-	for _, s := range bricklinkSets {
-
-		// Check cache and if found then return the cached data, otherwise map the search result to internal struct and cache it
-		item, ok, created := handleSearchResultBricklinkSet(r.Context(), s, xlocale)
-		if !ok {
-			// Error already logged, skip this item
-			continue
-		}
-
-		// If the set was newly created or misses price for xlocale, fetch full details
-		if created || !item.HasValidPrice() {
-
-			// Fetch details from LEGO and BrickLink to get details data
-			_, err = set.FetchDetails(r.Context(), item.ID, &item, lang, xlocale)
-			if err != nil {
-				// Error already logged, skip this item
-				continue
-			}
-
-			// Cache slug to set ID mapping
-			err = set.RedisSetSetIDForSlug(r.Context(), item, true)
-			if err != nil {
-				zap.L().Warn("Failed to cache slug to set ID mapping",
-					zap.Error(err),
-					zap.String("set_id", item.ID.String()),
-					zap.String("slug", item.Slug),
-				)
-				continue
-			}
-		}
-
-		// Append to results with external representation
-		sets = append(sets, item)
-	}
-
-	zap.L().Info("Successfully retrieved sets",
-		zap.String("query", query),
-		zap.Int("count", len(sets)),
-	)
-
-	render.JSON(w, r, sets)
-}
-
-// handleSearchResultBricklinkSet processes a single BrickLink search item and returns the internal Set representation
-func handleSearchResultBricklinkSet(ctx context.Context, bsi bricklink.SearchItem, xlocale language.Tag) (set.Locale, bool, bool) {
-	// Map to internal representation
-	core, err := set.NewCoreFromBricklinkSearchItem(bsi)
-	if err != nil {
-		zap.L().Error("Failed to map BrickLink set to internal representation",
-			zap.Error(err),
-			zap.String("set_number", bsi.StrItemNo),
-		)
-		return set.Locale{}, false, false
-	}
-
-	// Try to find the set in Redis cache by BrickLink ID
-	bricklinkID := strconv.Itoa(core.BricklinkID)
-	sCache, ttl, err := set.RedisGetLocaleByBricklinkID(ctx, bricklinkID, xlocale)
-
-	// An error has occurred, it's not a cache miss (not found) => log and skip caching for this item
-	if err != nil && !errors.Is(err, redis.ErrKeyNotFound) {
-		zap.L().Error("Failed to check set in Redis cache",
-			zap.Error(err),
-			zap.String("set_id", core.ID.String()),
-		)
-		return set.Locale{}, false, false
-	}
-
-	// Not found in cache, store it
-	if err != nil {
-		err = set.RedisSetCoreForBricklinkID(ctx, core, true)
-		if err != nil {
-			zap.L().Error("Failed to cache set in Redis",
-				zap.Error(err),
-				zap.String("set_id", core.ID.String()),
-				zap.Int("bricklink_id", core.BricklinkID),
-			)
-			return set.Locale{}, false, false
-		}
-
-		// No cached data, return the new item we created from the search result
-		return set.Locale{
-			Core: core,
-		}, true, true
-	}
-
-	// Check if TTL is too low :
-	// The websocket will need to get the core data from redis, there is a risk it may expire before we get there
-	if redis.IsTTLBelowThreshold(ttl, database.DB().Redis().TTLS.SetBricklinkMinThreshold) {
-		// TTL is too low, delete the old cached data and refresh
-		zap.L().Info("Cached set TTL is below threshold, refreshing",
-			zap.String("set_id", sCache.ID.String()),
-			zap.Int("bricklink_id", sCache.BricklinkID),
-			zap.Duration("remaining_ttl", ttl),
-		)
-
-		// Delete the expired/about-to-expire data
-		// This is what links the BrickLink ID to the set ID, and the websockets/runtimes relies on it
-		redis.MustDelete(ctx, set.RedisBuildKeyBricklinkIDToSetID(bricklinkID))
-
-		// Create a new cache entry, with a new setID to not conflict with existing one which may still be in use
-		// This will return the canonical set (with consistent UUID) even if another goroutine wins the race
-		err = set.RedisSetCoreForBricklinkID(ctx, core, true)
-		if err != nil {
-			zap.L().Error("Failed to cache set in Redis",
-				zap.Error(err),
-				zap.String("set_id", core.ID.String()),
-				zap.Int("bricklink_id", core.BricklinkID),
-			)
-			return set.Locale{}, false, false
-		}
-
-		// No cached data, return the new item we created from the search result
-		return set.Locale{
-			Core: core,
-		}, true, true
-	}
-
-	// Note : we might not have found a locale set, but there is at least a core
-	// Warning : the core might not be reliable, it must be checked when fetching its details
-
-	// No errors, data was found and TTL is fine, use the cached UUID
-	return sCache, true, false
-}
 
 // FetchSetDetails godoc
 //
@@ -212,6 +31,7 @@ func handleSearchResultBricklinkSet(ctx context.Context, bsi bricklink.SearchIte
 //	@Security		Bearer
 //	@Success		202	{object}	set.DetailsResponse				"Job created or data available"
 //	@Failure		400	{object}	render.ErrorResponse			"Bad Request"
+//	@Failure		404	{object}	render.ErrorResponse		"Not found
 //	@Router			/api/v1/set/details/{id} [post]
 func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 	setId, ok := ParseParamUUIDSoft(r, "id")
@@ -313,7 +133,6 @@ func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request
 		// There isn't an inventory access, we can skip the inventory stuff and proceed normally
 
 		// Create websocket runtime for fetching
-		cache.Set.MissingParts = len(cache.MissingBricks)
 		rs = h.srh.RunSet(cache.Set, xlocale, setruntime.OpTypeIncomplete, setruntime.InventoryAccess{})
 
 		// Put cache analyze results into the runtime

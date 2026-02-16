@@ -250,7 +250,8 @@ func parseItemIDs(itemIDstr string) []string {
 
 	for _, part := range parts {
 		id := strings.TrimSpace(part)
-		if id != "" {
+		// Filter out "Part Color Code Missing" and other invalid markers
+		if id != "" && !strings.Contains(strings.ToLower(id), "missing") {
 			ids = append(ids, id)
 		}
 	}

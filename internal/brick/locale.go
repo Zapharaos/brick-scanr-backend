@@ -18,6 +18,17 @@ type Locale struct {
 	Color         Color        `json:"color"`
 }
 
+// Copy creates a copy of the Locale struct, including the embedded Core struct.
+func (l *Locale) Copy() Locale {
+	return Locale{
+		Core:          l.Core.Copy(),
+		Price:         l.Price,
+		Status:        l.Status,
+		PickabrickURL: l.PickabrickURL,
+		Color:         l.Color,
+	}
+}
+
 // ResetDownToCore resets the Locale fields to their zero values, keeping only the Core information intact
 func (l *Locale) ResetDownToCore() {
 	l.Price = utils.Price{}

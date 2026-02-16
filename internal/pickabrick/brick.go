@@ -11,6 +11,12 @@ import (
 	"golang.org/x/text/language"
 )
 
+// CDN image URL patterns from LEGO's Pick-a-Brick frontend
+const (
+	CDNImageSpinPhotoreal = "https://www.lego.com/cdn/product-assets/element.spin.photoreal"
+	CDNImageSpinDefault   = "https://www.lego.com/cdn/product-assets/element.spin.default"
+)
+
 type AvailabilityStatus int
 
 const (
@@ -43,6 +49,7 @@ type Brick struct {
 	DesignID         string         `json:"designId"`
 	CollapseDesignID string         `json:"collapseDesignId"`
 	Name             string         `json:"name"`
+	ImageURL         string         `json:"imageUrl"`
 	ColorHex         string         `json:"colorHex"`
 	ContrastColorHex string         `json:"contrastColorHex"`
 	Price            Price          `json:"price"`
@@ -50,6 +57,26 @@ type Brick struct {
 	MaxOrderQuantity int            `json:"maxOrderQuantity"`
 	DeliveryChannel  string         `json:"deliveryChannel"`
 	Facets           *ElementFacets `json:"facets,omitempty"`
+}
+
+// GetImageURL returns the image URL for this brick.
+// If ImageURL from the API is available, it returns that.
+// Otherwise, it constructs a CDN URL using the element ID.
+// The CDN pattern is based on LEGO's Pick-a-Brick frontend code.
+// Uses the spin.photoreal format which provides PNG images without fixed size constraints.
+func (b *Brick) GetImageURL() string {
+	// Return API-provided image URL if available
+	if b.ImageURL != "" {
+		return b.ImageURL
+	}
+
+	// Fallback to CDN URL construction using element ID
+	// Format: https://www.lego.com/cdn/product-assets/element.spin.photoreal/{elementID}/00001.png
+	if b.ID != "" {
+		return fmt.Sprintf("%s/%s/00001.png", CDNImageSpinPhotoreal, b.ID)
+	}
+
+	return ""
 }
 
 // FetchBricksByDesignID fetches all bricks matching the designID

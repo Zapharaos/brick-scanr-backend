@@ -8,9 +8,7 @@ import (
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/brick"
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
-	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
-	"github.com/Zapharaos/brick-scanr-backend/internal/utils"
 	"github.com/Zapharaos/brick-scanr-backend/internal/workerpool"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -310,7 +308,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 	// Batch handler: send batch to frontend and update Redis
 	// Note: This is called from a single collector goroutine, so no mutex needed
 	batchHandler := func(batch []set.Brick) error {
-		return h.batchHandlerBricksProgress(rs, batch, bprogress, DataTypeBricklinkBricks)
+		return h.batchHandlerBricksProgress(rs, batch, bprogress, DataTypeBricklinkBricks, false)
 	}
 
 	// Create and run pool with batching
@@ -370,13 +368,13 @@ func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, lang language
 
 	// Worker function: fetch prices for a single design ID
 	workerFunc := func(ctx context.Context, brick set.Brick) (set.Brick, error) {
-		return h.workerHandlerBrickPrice(ctx, rs.Read().ID, brick, lang, xlocale)
+		return h.workerHandlerBrickPrice(ctx, brick, lang, xlocale)
 	}
 
 	// Batch handler: send batch to frontend
 	// Note: This is called from a single collector goroutine, so no mutex needed
 	batchHandler := func(batch []set.Brick) error {
-		return h.batchHandlerBricksProgress(rs, batch, bprogress, DataTypePickabrickBricks)
+		return h.batchHandlerBricksProgress(rs, batch, bprogress, DataTypePickabrickBricks, true)
 	}
 
 	// Create and run pool with batching
@@ -415,7 +413,6 @@ func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, lang language
 // workerHandlerBrickPrice is the worker function for fetching and updating a single brick's price, with cache checking and fallback to API
 func (h *Handler) workerHandlerBrickPrice(
 	ctx context.Context,
-	setID uuid.UUID,
 	bSet set.Brick,
 	lang language.Tag,
 	xlocale language.Tag,
@@ -445,89 +442,16 @@ func (h *Handler) workerHandlerBrickPrice(
 		}
 
 		// No valid cache entry for this brick ID - fetch from API
-		results, err := pickabrick.C().FetchBricksByBrickID(string(elementID), lang, xlocale)
-		if err != nil {
-			// Check if it's a not-found error
-			if !errors.Is(err, pickabrick.ErrBrickNotFound) {
-				// Other error - log and try next ID
-				h.logWarning(setID, "Pickabrick.FetchBricksByBrickID", err)
-				zap.L().Warn("Failed to fetch brick by elementID",
-					zap.Error(err),
-					zap.String("elementID", string(elementID)),
-					zap.String("xlocale", xlocale.String()))
-
-				continue // Try next ID
-			}
-
-			zap.L().Debug("ElementID not found in pick-a-brick API",
-				zap.String("elementID", string(elementID)),
-				zap.String("xlocale", xlocale.String()),
-			)
-
-			// Create a completely independent brick for caching not-found status
-			// We must not modify the original brick that will be used in the set
-			bLocaleNotFound := brick.Locale{
-				Core:          bSet.Core,
-				Status:        bSet.Status,
-				PickabrickURL: bSet.PickabrickURL,
-				Color:         bSet.Color,
-			}
-			bLocaleNotFound.Price = utils.Price{
-				CurrencyCode: xlocale.String(),
-				FetchedAt:    time.Now().UnixMilli(),
-				NotFound:     true,
-				ItemID:       string(elementID),
-			}
-			bLocaleNotFound.ElementID = &elementID
-
-			// Cache this brick ID as not-found (independent entry, won't affect the set's brick)
-			if cacheErr := brick.RedisSet(ctx, bLocaleNotFound, xlocale, true); cacheErr != nil {
-				h.logWarning(setID, "Redis.SetRedisBrick.NotFound", cacheErr)
-				zap.L().Warn("Failed to cache brick ID with not-found price",
-					zap.Error(cacheErr),
-					zap.String("elementID", string(elementID)),
-					zap.String("xlocale", xlocale.String()),
-				)
-			}
-
-			// Remember this ID as not found, but keep trying other IDs
-			if firstNotFoundLocale == nil {
-				firstNotFoundLocale = &bLocaleNotFound
-			}
+		ok, fetchValid, fetchNotFoundLocale := bSet.Locale.Fetch(ctx, elementID, lang, xlocale)
+		if !ok {
 			continue // Try next ID
 		}
 
-		// There should be only one matching brick per ID
-		// API client returns a slice so to be safe we will loop through the results just in case
-		for _, pab := range results {
-			// Just in case, check if the returned brick ID matches the requested one
-			if brick.ElementID(pab.ID) == elementID {
-
-				// Map result to local representation
-				mappedB := brick.MapLocaleFromPickabrick(bSet.Locale, pab, xlocale)
-
-				// Check if current price currency is already set, valid and lower
-				if bSet.Locale.HasLowerPrice(mappedB) {
-					continue
-				}
-
-				// Found a new valid and lower price, update brick with fetched data from pickabrick
-				bSet.Locale = mappedB
-
-				// Cache the updated brick with new price data
-				if cacheErr := brick.RedisSet(ctx, bSet.Locale, xlocale, true); cacheErr != nil {
-					h.logWarning(setID, "Redis.brick.Set", cacheErr)
-					zap.L().Warn("Failed to cache brick with new price",
-						zap.Error(cacheErr),
-						zap.String("element_id", string(elementID)),
-						zap.String("xlocale", xlocale.String()),
-					)
-					// Not fatal, continue without caching
-				}
-
-				// Mark that we found a locale brick with valid price
-				validLocale = true
-			}
+		// As long as we haven't found a valid price from cache, we can consider the fetched data as our best option
+		if !validLocale {
+			validLocale = fetchValid
+		} else if firstNotFoundLocale != nil {
+			firstNotFoundLocale = fetchNotFoundLocale
 		}
 	}
 
@@ -556,13 +480,15 @@ func (h *Handler) batchHandlerBricksProgress(
 	batch []set.Brick,
 	progress *Progress,
 	dataType DataType,
+	reuseMissingPartsCount bool,
 ) error {
 
 	// Update shared progress with current batch
 	for _, b := range batch {
 
-		// If the brick has a valid price, it means it's final, we can update the runtime and set with its data
-		if b.HasValidPrice() {
+		// If the brick has is custom or has a valid price, it means it's final
+		// We can update the runtime and set with its data
+		if b.IsCustom || b.HasValidPrice() {
 			// If applicable, remove the brick from the missing ones
 			rs.bricks.removeMissing(b.ID)
 
@@ -582,8 +508,10 @@ func (h *Handler) batchHandlerBricksProgress(
 			// Add brick to missing bricks in runtime set
 			rs.bricks.appendMissing(b)
 
-			// Update external set data
-			rs.set.IncrementMissingParts()
+			if !reuseMissingPartsCount {
+				// Update external set data
+				rs.set.IncrementMissingParts()
+			}
 		}
 
 		progress.AddItem(b)

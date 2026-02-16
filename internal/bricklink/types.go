@@ -63,6 +63,12 @@ func (ii *InventoryItem) IsCustom() bool {
 		}
 	}
 
+	// Check if item has no valid Element IDs (e.g., "Part Color Code Missing")
+	// Items without Element IDs are considered custom/unavailable
+	if len(ii.ItemIDs) == 0 {
+		return true
+	}
+
 	return false
 }
 

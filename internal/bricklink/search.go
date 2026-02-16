@@ -11,8 +11,8 @@ import (
 	"golang.org/x/text/language"
 )
 
-// SearchSets searches for LEGO sets on BrickLink
-func (c *Client) SearchSets(query string, lang language.Tag) ([]SearchItem, error) {
+// Search searches for LEGO elements on BrickLink
+func (c *Client) Search(query string, lang language.Tag) ([]SearchItem, []SearchItem, error) {
 	baseURL := "https://www.bricklink.com/ajax/clone/search/searchproduct.ajax"
 	params := url.Values{}
 	params.Add("q", query)
@@ -43,7 +43,7 @@ func (c *Client) SearchSets(query string, lang language.Tag) ([]SearchItem, erro
 
 	req, err := http.NewRequest("GET", requestURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
@@ -57,7 +57,7 @@ func (c *Client) SearchSets(query string, lang language.Tag) ([]SearchItem, erro
 	// Execute the request with rate limiting and retry
 	resp, err := c.throttler.DoWithRetry(req.Context(), c.httpClient, req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch data: %w", err)
+		return nil, nil, fmt.Errorf("failed to fetch data: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -65,30 +65,43 @@ func (c *Client) SearchSets(query string, lang language.Tag) ([]SearchItem, erro
 	c.throttler.LogRateLimitHeaders(resp)
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return nil, nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	var searchResp searchResponse
 	if err := json.Unmarshal(body, &searchResp); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse JSON response: %w", err)
 	}
 
 	if searchResp.ReturnCode != 0 {
-		return nil, fmt.Errorf("search API returned error code %d: %s", searchResp.ReturnCode, searchResp.ReturnMessage)
+		return nil, nil, fmt.Errorf("search API returned error code %d: %s", searchResp.ReturnCode, searchResp.ReturnMessage)
 	}
 
-	// Filter for Sets only (type "S")
 	var sets []SearchItem
+	var parts []SearchItem
+
+	// Filter for only sets (type "S") and parts (type "P"), ignoring other types like minifigures, instructions, etc.
 	for _, typeList := range searchResp.Result.TypeList {
+
+		// Sets
 		if typeList.Type == "S" {
 			for _, item := range typeList.Items {
 				if item.TypeItem == "S" {
 					sets = append(sets, item)
+				}
+			}
+		}
+
+		// Parts
+		if typeList.Type == "P" {
+			for _, item := range typeList.Items {
+				if item.TypeItem == "P" {
+					parts = append(parts, item)
 				}
 			}
 		}
@@ -98,5 +111,5 @@ func (c *Client) SearchSets(query string, lang language.Tag) ([]SearchItem, erro
 		zap.String("query", query),
 		zap.Int("set_count", len(sets)))
 
-	return sets, nil
+	return sets, parts, nil
 }

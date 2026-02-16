@@ -61,8 +61,11 @@ func New(setHandler *setruntime.Handler) *Router {
 		// Accept-Language & X-Locale for all routes
 		r.Use(mid.LocaleMiddleware)
 
+		// Search endpoint
+		r.Get("/search/{query}", handlers.Search)
+
+		// Set related endpoints
 		r.Route("/set", func(r chi.Router) {
-			r.Get("/search/{query}", handlers.SearchSets)
 
 			// Details
 			r.With(httprate.LimitByIP(
@@ -73,6 +76,16 @@ func New(setHandler *setruntime.Handler) *Router {
 
 			// Export
 			r.Post("/export/{id}", router.handler.ExportSet)
+		})
+
+		// Brick related endpoints
+		r.Route("/brick", func(r chi.Router) {
+
+			// Details
+			r.With(httprate.LimitByIP(
+				viper.GetInt("rate_limit.brick_details.requests"),
+				viper.GetDuration("rate_limit.brick_details.window")*time.Second,
+			)).Post("/details/{id}", router.handler.FetchBrickDetails)
 		})
 	})
 
