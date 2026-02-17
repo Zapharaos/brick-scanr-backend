@@ -46,11 +46,11 @@ func (d *Design) Fetch(ctx context.Context, lang, xlocale language.Tag) ([]Local
 // FetchMinimal fetches the minimal design details (name, image, etc.) for the given design ID and locale from BrickLink.
 func (d *Design) FetchMinimal(ctx context.Context, lang, xlocale language.Tag) error {
 	// Query BrickLink for brick details
-	bricklinkBrick, err := bricklink.C().FetchBrickDetails(string(d.DesignID), lang)
+	bricklinkBrick, err := bricklink.C().FetchBrickDetails(string(d.ID.DesignID), lang)
 	if err != nil {
 		zap.L().Error("Failed to fetch brick details from BrickLink",
 			zap.Error(err),
-			zap.String("design_id", string(d.DesignID)),
+			zap.String("design_id", string(d.ID.DesignID)),
 		)
 		return err
 	}
@@ -65,7 +65,7 @@ func (d *Design) FetchMinimal(ctx context.Context, lang, xlocale language.Tag) e
 	if err = RedisSetDesign(ctx, *d, xlocale, true); err != nil {
 		zap.L().Error("Failed to cache design in Redis",
 			zap.Error(err),
-			zap.String("design_id", string(d.DesignID)),
+			zap.String("design_id", string(d.ID.DesignID)),
 		)
 		// Not a critical error, we can still return the data without caching
 	}
@@ -76,11 +76,11 @@ func (d *Design) FetchMinimal(ctx context.Context, lang, xlocale language.Tag) e
 // FetchBricks fetches the bricks associated with this design ID from the pick-a-brick API, updates the design with the element IDs, and caches the data.
 func (d *Design) FetchBricks(ctx context.Context, lang, xlocale language.Tag) ([]Locale, error) {
 	// Fetch all bricks matching this design ID
-	pabBricks, err := pickabrick.C().FetchBricksByDesignID(string(d.DesignID), lang, xlocale)
+	pabBricks, err := pickabrick.C().FetchBricksByDesignID(string(d.ID.DesignID), lang, xlocale)
 	if err != nil {
 		zap.L().Error("Failed to fetch bricks by design ID from pick-a-brick API",
 			zap.Error(err),
-			zap.String("design_id", string(d.DesignID)),
+			zap.String("design_id", string(d.ID.DesignID)),
 		)
 		return nil, err
 	}
@@ -95,14 +95,14 @@ func (d *Design) FetchBricks(ctx context.Context, lang, xlocale language.Tag) ([
 		mappedB := MapLocaleFromPickabrick(Locale{}, pab, xlocale)
 
 		// Load preferred data into new instance (default to pick-a-brick data, but if cache has valid price that is lower, use that instead)
-		bLocale, valid, notfound := mappedB.LoadFromRedis(ctx, *mappedB.ElementID, xlocale, false, true)
+		bLocale, valid, notfound := mappedB.LoadFromRedis(ctx, mappedB.ID.ElementID, xlocale, false, true)
 		if !valid && !notfound {
 			// Not found in cache, cache the brick details in Redis for future searches and lookups
 			err = RedisSetLocale(ctx, bLocale, xlocale, true)
 			if err != nil {
 				zap.L().Error("Failed to cache brick in Redis",
 					zap.Error(err),
-					zap.String("element_id", string(*mappedB.ElementID)),
+					zap.String("element_id", string(mappedB.ID.ElementID)),
 				)
 				// Not a critical error, we can still return the data without caching
 			}
@@ -123,7 +123,7 @@ func (d *Design) FetchBricks(ctx context.Context, lang, xlocale language.Tag) ([
 	if err = RedisSetDesign(ctx, *d, xlocale, true); err != nil {
 		zap.L().Error("Failed to cache design in Redis",
 			zap.Error(err),
-			zap.String("design_id", string(d.DesignID)),
+			zap.String("design_id", string(d.ID.DesignID)),
 		)
 		// Not a critical error, we can still return the data without caching
 	}

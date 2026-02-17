@@ -64,10 +64,10 @@ func ExportBuildTable(set Locale, localizer interface{}, tag language.Tag) *spit
 		rowData["status"] = lingo.MustTranslate(localizer, lingo.NewMessage(statusKey))
 		rowData["color"] = b.Color.Name
 		rowData["name"] = b.Name
-		if b.ElementID != nil {
-			rowData["element"] = *b.ElementID
+		if b.ID != nil {
+			rowData["element"] = b.ID.ElementID
 		}
-		rowData["design"] = b.DesignID
+		rowData["design"] = b.ID.DesignID
 		rowData["quantity"] = b.Quantity
 		rowData["unit-price"] = b.Price.Formatted(tag)
 		rowData["total-price"] = b.TotalPrice.Formatted(tag)

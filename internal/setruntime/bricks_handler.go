@@ -74,7 +74,7 @@ func (bh *BricksHandler) appendMissing(brick set.Brick) {
 	}
 
 	// Add the brick to the missing map using its ID as the key
-	bh.missing[brick.ID] = brick
+	bh.missing[brick.UUID] = brick
 }
 
 // removeMissing removes a Brick from the missing slice by its ID

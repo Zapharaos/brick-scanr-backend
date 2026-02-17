@@ -270,10 +270,10 @@ func (i *Inventory) write(batch Progress) {
 	// Update inventory with the new batch of bricks
 	for _, brick := range batch.Items {
 		if bp, ok := brick.(set.Brick); ok {
-			i.inventory[bp.ID] = bp
+			i.inventory[bp.UUID] = bp
 		}
 		if bp, ok := brick.(*set.Brick); ok && bp != nil {
-			i.inventory[bp.ID] = *bp
+			i.inventory[bp.UUID] = *bp
 		}
 	}
 	i.total = batch.Total

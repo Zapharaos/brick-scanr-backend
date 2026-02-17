@@ -251,17 +251,17 @@ func checkSetDataValidity(ctx context.Context, s set.Locale, setID uuid.UUID, xl
 
 // CheckBrickCache checks the cache for a given Brick and returns the updated Brick and whether it has valid cached data
 func CheckBrickCache(ctx context.Context, bSet set.Brick, tag language.Tag, allowOutdated bool) (set.Brick, bool) {
-	// When applying locales from cache, we might overwrite the elementIDs slice
+	// When applying locales from cache, we might overwrite the IDs slice
 	// To avoid loosing data, we reset it to the original slice
-	originalElementIDs := bSet.Locale.ElementIDs
+	originalIDs := bSet.Locale.IDs
 
 	var firstNotFoundLocale *brick.Locale
 	var validLocale bool
 
 	// The main ElementID isn't 100% valid, process over the available ElementIDs and decide afterward
-	for _, elementID := range bSet.ElementIDs {
+	for _, ID := range bSet.IDs {
 		// Try to find in cache first
-		bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, elementID, tag, allowOutdated, true)
+		bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, ID.ElementID, tag, allowOutdated, true)
 		if notFound && firstNotFoundLocale == nil {
 			// Brick Locale cached with not-found price
 			// We can consider this brick as up-to-date with a not-found price
@@ -271,7 +271,7 @@ func CheckBrickCache(ctx context.Context, bSet set.Brick, tag language.Tag, allo
 		} else if valid {
 			// Brick Locale cached with valid price and up-to-date
 			// Save temporarily until we process them all, we might find a matching ID with a better price
-			bSet = set.NewBrickWithID(bSet.ID, bSet.Inventory, bRedis)
+			bSet = set.NewBrickWithUUID(bSet.UUID, bSet.Inventory, bRedis)
 			validLocale = true
 			continue // Try next ID
 		}
@@ -279,15 +279,15 @@ func CheckBrickCache(ctx context.Context, bSet set.Brick, tag language.Tag, allo
 
 	// bSet has already been updated with a valid locale from cache, append it and continue
 	if validLocale {
-		bSet.SetElementIDs(originalElementIDs) // Reset to original slice to avoid losing data
+		bSet.SetIDs(originalIDs) // Reset to original slice to avoid losing data
 		return bSet, true
 	}
 
 	// No 100% valid locale was found, but at least one not-found brick locale was found
 	// We can consider this brick as up-to-date with a not-found price, append it and continue
 	if firstNotFoundLocale != nil {
-		bSet = set.NewBrickWithID(bSet.ID, bSet.Inventory, *firstNotFoundLocale)
-		bSet.SetElementIDs(originalElementIDs) // Reset to original slice to avoid losing data
+		bSet = set.NewBrickWithUUID(bSet.UUID, bSet.Inventory, *firstNotFoundLocale)
+		bSet.SetIDs(originalIDs) // Reset to original slice to avoid losing data
 		return bSet, true
 	}
 

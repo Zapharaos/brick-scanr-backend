@@ -11,29 +11,33 @@ type ElementID string
 // DesignID represents a brick design for which there may be multiple ElementID (e.g. different colors or variations)
 type DesignID string
 
+type ID struct {
+	ElementID ElementID `json:"element_id"`
+	DesignID  DesignID  `json:"design_id"`
+}
+
 // Core represents a Lego brick with only the core identifying information and general fields that are not specific.
 type Core struct {
-	IsCustom   bool        `json:"is_custom"`
-	ElementIDs []ElementID `json:"ids"`
-	ElementID  *ElementID  `json:"element_id"`
-	DesignID   DesignID    `json:"design_id"`
-	Name       string      `json:"name"`
-	ImageURL   string      `json:"image_url"`
+	IsCustom bool   `json:"is_custom"`
+	ID       *ID    `json:"id"`
+	IDs      []ID   `json:"ids"`
+	Name     string `json:"name"`
+	ImageURL string `json:"image_url"`
 }
 
 // TODO : bricklinkURL ? bricklinkColor ? in Core or Locale ?
 
-// GetID returns the appropriate ElementID to use
-func (c *Core) GetID() (ElementID, error) {
+// GetElementID returns the appropriate ElementID to use
+func (c *Core) GetElementID() (ElementID, error) {
 	// Determine the ID
 	var keyID ElementID
-	if c.ElementID != nil {
-		keyID = *c.ElementID
-	} else if len(c.ElementIDs) > 0 {
+	if c.ID != nil {
+		keyID = c.ID.ElementID
+	} else if len(c.IDs) > 0 {
 		// No main ID: return the first non-empty (after trimming) ID in the list
-		for _, id := range c.ElementIDs {
-			if strings.TrimSpace(string(id)) != "" {
-				keyID = id
+		for _, id := range c.IDs {
+			if strings.TrimSpace(string(id.ElementID)) != "" {
+				keyID = id.ElementID
 				break
 			}
 		}
@@ -46,9 +50,9 @@ func (c *Core) GetID() (ElementID, error) {
 	return keyID, nil
 }
 
-// SetElementIDs sets the ElementIDs slice
-func (c *Core) SetElementIDs(ids []ElementID) {
-	c.ElementIDs = ids
+// SetIDs sets the ElementIDs slice
+func (c *Core) SetIDs(ids []ID) {
+	c.IDs = ids
 }
 
 // Copy creates a copy of the Core struct

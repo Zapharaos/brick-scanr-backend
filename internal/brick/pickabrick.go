@@ -14,9 +14,11 @@ import (
 // MapLocaleFromPickabrick maps a pickabrick.Brick to an internal Locale representation
 func MapLocaleFromPickabrick(brick Locale, pab pickabrick.Brick, tag language.Tag) Locale {
 	// Update Core
-	elementID := ElementID(pab.ID)
-	brick.ElementID = &elementID
-	brick.DesignID = DesignID(pab.DesignID)
+	id := ID{
+		ElementID: ElementID(pab.ID),
+		DesignID:  DesignID(pab.DesignID),
+	}
+	brick.ID = &id
 	brick.Name = pab.Name
 	brick.ImageURL = pab.GetImageURL() // Use GetImageURL() which provides CDN fallback
 
@@ -68,7 +70,7 @@ func (l *Locale) Fetch(ctx context.Context, elementID ElementID, lang, xlocale l
 			NotFound:     true,
 			ItemID:       string(elementID),
 		}
-		bLocaleNotFound.ElementID = &elementID
+		bLocaleNotFound.ID.ElementID = elementID
 
 		// Cache this brick ID as not-found (independent entry, won't affect the set's brick)
 		if cacheErr := RedisSetLocale(ctx, bLocaleNotFound, xlocale, true); cacheErr != nil {

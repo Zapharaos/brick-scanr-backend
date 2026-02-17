@@ -140,7 +140,7 @@ func (h *Handler) FetchFetchSetIncomplete(
 
 		// Update the missing bricks in the runtime set based on the new inventory data
 		for _, b := range inventory {
-			if _, ok := rs.bricks.missing[b.ID]; !ok {
+			if _, ok := rs.bricks.missing[b.UUID]; !ok {
 				// This brick is not in the missing map, add it
 				rs.bricks.appendMissing(b)
 			}
@@ -261,18 +261,18 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 			Core: bCore,
 		})
 
-		// When applying locales from cache, we might overwrite the elementIDs slice
+		// When applying locales from cache, we might overwrite the IDs slice
 		// To avoid loosing data, we reset it to the original slice
-		originalElementIDs := bCore.ElementIDs
+		originalIDs := bCore.IDs
 
 		var firstNotFoundLocale *brick.Locale
 		var validLocale bool
 
 		// Process any existing itemID through cache first
-		for _, id := range originalElementIDs {
+		for _, id := range originalIDs {
 
 			// Try to find in cache first
-			bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, id, tag, false, true)
+			bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, id.ElementID, tag, false, true)
 			if notFound && firstNotFoundLocale == nil {
 				// Brick Locale cached with not-found price
 				// We can consider this brick as up-to-date with a not-found price
@@ -281,7 +281,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 			}
 			if valid {
 				// Brick Locale cached with valid price and up-to-date, return safely
-				bSet = set.NewBrickWithID(bSet.ID, bSet.Inventory, bRedis)
+				bSet = set.NewBrickWithUUID(bSet.UUID, bSet.Inventory, bRedis)
 				validLocale = true
 				continue // Try next ID
 			}
@@ -289,15 +289,15 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 
 		// bSet has already been updated with a valid locale from cache
 		if validLocale {
-			bSet.SetElementIDs(originalElementIDs) // Reset to original slice to avoid losing data
+			bSet.SetIDs(originalIDs) // Reset to original slice to avoid losing data
 			return bSet, nil
 		}
 
 		// No 100% valid locale was found, but at least one not-found brick locale was found
 		// We can consider this brick as up-to-date with a not-found price, return safely
 		if firstNotFoundLocale != nil {
-			bSet = set.NewBrickWithID(bSet.ID, bSet.Inventory, *firstNotFoundLocale)
-			bSet.SetElementIDs(originalElementIDs) // Reset to original slice to avoid losing data
+			bSet = set.NewBrickWithUUID(bSet.UUID, bSet.Inventory, *firstNotFoundLocale)
+			bSet.SetIDs(originalIDs) // Reset to original slice to avoid losing data
 			return bSet, nil
 		}
 
@@ -418,15 +418,15 @@ func (h *Handler) workerHandlerBrickPrice(
 	xlocale language.Tag,
 ) (set.Brick, error) {
 
-	originalElementIDs := bSet.Locale.ElementIDs
+	originalIDs := bSet.Locale.IDs
 	var firstNotFoundLocale *brick.Locale
 	var validLocale bool
 
 	// Try to find a valid element ID. If multiple, compare to get the best one
-	for _, elementID := range originalElementIDs {
+	for _, id := range originalIDs {
 
 		// Try to find in cache first
-		bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, elementID, xlocale, false, true)
+		bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, id.ElementID, xlocale, false, true)
 		if notFound && firstNotFoundLocale == nil {
 			// Brick Locale cached with not-found price
 			// We can consider this brick as up-to-date with a not-found price
@@ -436,13 +436,13 @@ func (h *Handler) workerHandlerBrickPrice(
 		} else if valid {
 			// Brick Locale cached with valid price and up-to-date, return safely
 			// Save temporarily until we process them all, we might find a matching ID with a better price
-			bSet = set.NewBrickWithID(bSet.ID, bSet.Inventory, bRedis)
+			bSet = set.NewBrickWithUUID(bSet.UUID, bSet.Inventory, bRedis)
 			validLocale = true
 			continue // Try next ID
 		}
 
 		// No valid cache entry for this brick ID - fetch from API
-		ok, fetchValid, fetchNotFoundLocale := bSet.Locale.Fetch(ctx, elementID, lang, xlocale)
+		ok, fetchValid, fetchNotFoundLocale := bSet.Locale.Fetch(ctx, id.ElementID, lang, xlocale)
 		if !ok {
 			continue // Try next ID
 		}
@@ -458,9 +458,9 @@ func (h *Handler) workerHandlerBrickPrice(
 	// If we didn't find a valid price for any brick ID, but we did encounter not-found entries,
 	// set the MainID to one of the not-found IDs to avoid unnecessary cache lookups next time
 	if !validLocale && firstNotFoundLocale != nil {
-		bSet = set.NewBrickWithID(bSet.ID, bSet.Inventory, *firstNotFoundLocale)
+		bSet = set.NewBrickWithUUID(bSet.UUID, bSet.Inventory, *firstNotFoundLocale)
 		zap.L().Debug("No valid price found for any brick ID, set ElementID to first not-found ID",
-			zap.String("element_id", string(*firstNotFoundLocale.ElementID)),
+			zap.String("element_id", string(firstNotFoundLocale.ID.ElementID)),
 			zap.String("xlocale", xlocale.String()),
 		)
 	}
@@ -468,7 +468,7 @@ func (h *Handler) workerHandlerBrickPrice(
 	// When applying locales, we might overwrite the elementIDs slice
 	// To avoid loosing data, we reset it to the original slice
 	if validLocale || firstNotFoundLocale != nil {
-		bSet.SetElementIDs(originalElementIDs) // Reset to original slice to avoid losing data
+		bSet.SetIDs(originalIDs) // Reset to original slice to avoid losing data
 	}
 
 	return bSet, nil
@@ -490,7 +490,7 @@ func (h *Handler) batchHandlerBricksProgress(
 		// We can update the runtime and set with its data
 		if b.IsCustom || b.HasValidPrice() {
 			// If applicable, remove the brick from the missing ones
-			rs.bricks.removeMissing(b.ID)
+			rs.bricks.removeMissing(b.UUID)
 
 			// Still consider the brick as missing because price was not found
 			// However it is not literally missing

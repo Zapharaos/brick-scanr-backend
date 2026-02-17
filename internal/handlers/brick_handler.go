@@ -43,7 +43,7 @@ func (h Handler) FetchBrickDetailsByElement(w http.ResponseWriter, r *http.Reque
 	// Build a minimal brick locale version
 	elementID := brick.ElementID(id)
 	bLocale := brick.Locale{}
-	bLocale.ElementID = &elementID
+	bLocale.ID.ElementID = elementID
 
 	// Search for the brick locale in cache
 	var valid, notfound bool
@@ -126,7 +126,7 @@ func (h Handler) FetchBrickDetailsByDesign(w http.ResponseWriter, r *http.Reques
 
 	// Create a design index to hold the main design and its alternates
 	designIndex := make(brick.DesignIndex)
-	designIndex[mainDesign.Design.DesignID] = &mainDesign
+	designIndex[mainDesign.Design.ID.DesignID] = &mainDesign
 
 	// Iterate over each design ID
 	for _, alternateDesignID := range mainDesign.Alternates {
@@ -141,7 +141,7 @@ func (h Handler) FetchBrickDetailsByDesign(w http.ResponseWriter, r *http.Reques
 		}
 
 		// Add the alternate design to the index
-		designIndex[alternateDesign.Design.DesignID] = &alternateDesign
+		designIndex[alternateDesign.Design.ID.DesignID] = &alternateDesign
 	}
 
 	// TODO : provide a price range ? no status ? special label ? a dropdown to see every element IDs !!!
@@ -177,7 +177,7 @@ func fetchDesign(
 
 	var bricks []brick.Locale
 	design = brick.Design{}
-	design.DesignID = designID
+	design.ID.DesignID = designID
 
 	switch design.DesignStatus {
 

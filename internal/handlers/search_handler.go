@@ -271,7 +271,7 @@ func handleBricklinkBrickByDesignID(ctx context.Context, designID brick.DesignID
 		return design, true
 	}
 
-	design.DesignID = designID
+	design.ID.DesignID = designID
 
 	// Not found in cache, fetch it and cache it
 	err = design.FetchMinimal(ctx, lang, xlocale)
@@ -286,7 +286,7 @@ func handleBricklinkBrickByDesignID(ctx context.Context, designID brick.DesignID
 func handleBricklinkBrickByElementID(ctx context.Context, elementID brick.ElementID, designID brick.DesignID, lang language.Tag, xlocale language.Tag) (brick.Locale, bool) {
 	// Build a minimal brick locale version
 	bLocale := brick.Locale{}
-	bLocale.ElementID = &elementID
+	bLocale.ID.ElementID = elementID
 
 	// Search for the brick locale in cache
 	var valid, notfound bool
@@ -331,10 +331,6 @@ func handleBricklinkBrickByElementID(ctx context.Context, elementID brick.Elemen
 		)
 		// Not a critical error, we can still return the data without caching
 	}
-
-	// TODO : use uuid pair (designID + elementID) ?
-	// main field, and the others as alternates in a slice or map ?
-	// how do we handle updates to slice or map to not override data that was updated by another goroutine?
 
 	// TODO : the problem is that this updates only the matching brick with element ID
 	// does not handle same design ID but different element ID, nor set bricks

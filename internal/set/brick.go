@@ -14,21 +14,21 @@ type Brick struct {
 	brick.Locale
 
 	// ID is used for tracking and referencing purposes during the fetching process and while communicating with clients
-	ID         uuid.UUID   `json:"id"`
+	UUID       uuid.UUID   `json:"uuid"`
 	TotalPrice utils.Price `json:"total_price"`
 }
 
 // NewBrick creates a new Brick instance by combining the provided Inventory and Locale information,
 // and calculates the total price based on the unit price and quantity.
 func NewBrick(inventory brick.Inventory, locale brick.Locale) Brick {
-	return NewBrickWithID(uuid.New(), inventory, locale)
+	return NewBrickWithUUID(uuid.New(), inventory, locale)
 }
 
-// NewBrickWithID creates a new Brick instance with a specified ID by combining the provided Inventory and Locale information,
+// NewBrickWithUUID creates a new Brick instance with a specified ID by combining the provided Inventory and Locale information,
 // and calculates the total price based on the unit price and quantity.
-func NewBrickWithID(id uuid.UUID, inventory brick.Inventory, locale brick.Locale) Brick {
+func NewBrickWithUUID(uuid uuid.UUID, inventory brick.Inventory, locale brick.Locale) Brick {
 	b := Brick{
-		ID:        id,
+		UUID:      uuid,
 		Inventory: inventory,
 		Locale:    locale,
 	}

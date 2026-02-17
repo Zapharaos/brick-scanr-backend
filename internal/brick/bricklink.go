@@ -14,22 +14,27 @@ func MapNewFromBricklinkInventoryItem(bi bricklink.InventoryItem) (Core, Invento
 
 // MapFromBricklinkInventoryItem maps a Bricklink InventoryItem into an existing Inventory instance, updating only certain fields
 func MapFromBricklinkInventoryItem(core Core, bi bricklink.InventoryItem) (Core, Inventory) {
-	// Map ItemIDs to ElementIDs
-	var ids []ElementID
-	ids = make([]ElementID, len(bi.ItemIDs))
+	var ids []ID
+	ids = make([]ID, len(bi.ItemIDs))
 	for i, id := range bi.ItemIDs {
-		ids[i] = ElementID(id)
+		ids[i] = ID{
+			ElementID: ElementID(id),
+		}
+	}
+
+	id := ID{
+		DesignID: DesignID(bi.ItemNo),
+	}
+	if bi.HasUniqueItemID() {
+		id.ElementID = ids[0].ElementID
 	}
 
 	// Update Core
 	core.IsCustom = bi.IsCustom()
-	core.ElementIDs = ids
-	core.DesignID = DesignID(bi.ItemNo)
+	core.ID = &id
+	core.IDs = ids
 	core.Name = bi.Description
 	core.ImageURL = bi.ImageURL
-	if bi.HasUniqueItemID() {
-		core.ElementID = &ids[0]
-	}
 
 	// Update Inventory
 	var inventory Inventory
@@ -47,12 +52,12 @@ func MapFromBricklinkInventoryItem(core Core, bi bricklink.InventoryItem) (Core,
 func NewCoreFromBricklinkBrick(b *bricklink.Brick) Core {
 	var core Core
 
-	// TODO : design ID's instead of element ID's
-
 	// Set element IDs
-	elementID := ElementID(b.ItemNo)
-	core.ElementID = &elementID
-	core.ElementIDs = []ElementID{elementID}
+	id := ID{
+		DesignID: DesignID(b.ItemNo),
+	}
+	core.ID = &id
+	core.IDs = []ID{id}
 
 	// Add alternate item numbers if available
 	// Alternate item numbers can be a comma-separated list like "6141, 15570, 30057"
@@ -63,8 +68,9 @@ func NewCoreFromBricklinkBrick(b *bricklink.Brick) Core {
 			// Trim whitespace from each item
 			trimmed := strings.TrimSpace(altItem)
 			if trimmed != "" {
-				altElementID := ElementID(trimmed)
-				core.ElementIDs = append(core.ElementIDs, altElementID)
+				core.IDs = append(core.IDs, ID{
+					DesignID: DesignID(trimmed),
+				})
 			}
 		}
 	}

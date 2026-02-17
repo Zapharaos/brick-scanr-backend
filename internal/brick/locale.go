@@ -40,12 +40,10 @@ func (l *Locale) ResetDownToCore() {
 // BuildPickabrickURL constructs the Pick-a-Brick URL for the Brick based on its ID and the given tag
 func (l *Locale) BuildPickabrickURL(tag language.Tag) {
 	var id string
-	if l.ElementID != nil {
-		id = string(*l.ElementID)
-	} else if len(l.ElementIDs) > 0 {
-		id = string(l.ElementIDs[0])
-	} else {
-		id = string(l.DesignID)
+	if l.ID != nil {
+		id = string(l.ID.ElementID)
+	} else if len(l.IDs) > 0 {
+		id = string(l.IDs[0].ElementID)
 	}
 	l.PickabrickURL = "https://www.lego.com/" + tag.String() + "/pick-and-build/pick-a-brick?selectedElement=" + id
 }

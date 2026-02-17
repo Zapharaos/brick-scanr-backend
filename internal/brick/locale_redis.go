@@ -49,7 +49,7 @@ func RedisGetLocale(ctx context.Context, elementID ElementID, tag language.Tag) 
 
 // RedisSetLocale stores a Brick in Redis by its ElementID and tag
 func RedisSetLocale(ctx context.Context, brick Locale, tag language.Tag, updateTTL bool) error {
-	id, err := brick.GetID()
+	id, err := brick.GetElementID()
 	if err != nil {
 		zap.L().Error("failed to get brick ID for redis",
 			zap.Error(err),
@@ -63,7 +63,7 @@ func RedisSetLocale(ctx context.Context, brick Locale, tag language.Tag, updateT
 		zap.L().Error("failed to marshal brick to JSON",
 			zap.Error(err),
 			zap.String("brickID", string(id)),
-			zap.String("designID", string(brick.DesignID)),
+			zap.String("elementID", string(brick.ID.ElementID)),
 		)
 		return err
 	}

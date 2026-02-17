@@ -54,12 +54,12 @@ func RedisSetDesign(ctx context.Context, design Design, tag language.Tag, update
 	if err != nil {
 		zap.L().Error("failed to marshal design to JSON",
 			zap.Error(err),
-			zap.String("designID", string(design.DesignID)),
+			zap.String("designID", string(design.ID.DesignID)),
 		)
 		return err
 	}
 
-	key := RedisBuildKeyDesign(design.DesignID, tag)
+	key := RedisBuildKeyDesign(design.ID.DesignID, tag)
 
 	// Determine GetTTL
 	var ttl time.Duration
