@@ -71,7 +71,7 @@ func (l *Locale) Fetch(ctx context.Context, elementID ElementID, lang, xlocale l
 		bLocaleNotFound.ElementID = &elementID
 
 		// Cache this brick ID as not-found (independent entry, won't affect the set's brick)
-		if cacheErr := RedisSet(ctx, bLocaleNotFound, xlocale, true); cacheErr != nil {
+		if cacheErr := RedisSetLocale(ctx, bLocaleNotFound, xlocale, true); cacheErr != nil {
 			zap.L().Warn("Failed to cache brick ID with not-found price",
 				zap.Error(cacheErr),
 				zap.String("elementID", string(elementID)),
@@ -107,7 +107,7 @@ func (l *Locale) Fetch(ctx context.Context, elementID ElementID, lang, xlocale l
 			l.Color = mappedB.Color
 
 			// Cache the updated brick with new price data
-			if cacheErr := RedisSet(ctx, *l, xlocale, true); cacheErr != nil {
+			if cacheErr := RedisSetLocale(ctx, *l, xlocale, true); cacheErr != nil {
 				zap.L().Warn("Failed to cache brick with new price",
 					zap.Error(cacheErr),
 					zap.String("element_id", string(elementID)),

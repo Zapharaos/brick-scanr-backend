@@ -78,7 +78,7 @@ func (l *Locale) HasLowerPrice(l2 Locale) bool {
 // LoadFromRedis attempts to update the Locale with data from the cache for the given ElementID and language tag.
 func (l *Locale) LoadFromRedis(ctx context.Context, id ElementID, tag language.Tag, allowOutdated, mustLower bool) (Locale, bool, bool) {
 	// Check cache first for this specific brick ID
-	if bCache, err := RedisGet(ctx, id, tag); err == nil {
+	if bCache, err := RedisGetLocale(ctx, id, tag); err == nil {
 
 		// Check if it has a valid cached not-found entry
 		if bCache.Price.IsNotFound() {

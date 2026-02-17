@@ -81,11 +81,17 @@ func New(setHandler *setruntime.Handler) *Router {
 		// Brick related endpoints
 		r.Route("/brick", func(r chi.Router) {
 
-			// Details
+			// Details by design ID
 			r.With(httprate.LimitByIP(
 				viper.GetInt("rate_limit.brick_details.requests"),
 				viper.GetDuration("rate_limit.brick_details.window")*time.Second,
-			)).Post("/details/{id}", router.handler.FetchBrickDetails)
+			)).Get("/details/design/{id}", router.handler.FetchBrickDetailsByDesign)
+
+			// Details by element ID
+			r.With(httprate.LimitByIP(
+				viper.GetInt("rate_limit.brick_details.requests"),
+				viper.GetDuration("rate_limit.brick_details.window")*time.Second,
+			)).Get("/details/element/{id}", router.handler.FetchBrickDetailsByElement)
 		})
 	})
 

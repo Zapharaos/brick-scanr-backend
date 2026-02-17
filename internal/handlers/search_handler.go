@@ -22,7 +22,8 @@ type SearchResponseType int
 
 const (
 	SearchResponseTypeSet SearchResponseType = iota
-	SearchResponseTypeBrick
+	SearchResponseTypeBrickElement
+	SearchResponseTypeBrickDesign
 )
 
 type SearchResponseItem struct {
@@ -119,14 +120,14 @@ func Search(w http.ResponseWriter, r *http.Request) {
 	for _, b := range bricklinkBricks {
 
 		// Check cache and if found then return the cached data, otherwise map the search result to internal struct and cache it
-		item, ok := handleSearchResultBricklinkBrick(r.Context(), b, lang, xlocale)
+		itemType, item, ok := handleSearchResultBricklinkBrick(r.Context(), b, lang, xlocale)
 		if !ok {
 			// Error already logged, skip this item
 			continue
 		}
 
 		responseItems = append(responseItems, SearchResponseItem{
-			Type: SearchResponseTypeBrick,
+			Type: itemType,
 			Item: item,
 		})
 	}
@@ -222,10 +223,67 @@ func handleSearchResultBricklinkSet(ctx context.Context, bsi bricklink.SearchIte
 }
 
 // handleSearchResultBricklinkBrick processes a single BrickLink search item and returns the internal Brick representation
-func handleSearchResultBricklinkBrick(ctx context.Context, bsi bricklink.SearchItem, lang language.Tag, xlocale language.Tag) (brick.Locale, bool) {
-	// Get the element ID from the BrickLink search result
-	elementID := brick.ElementID(bsi.StrItemNo)
+func handleSearchResultBricklinkBrick(ctx context.Context, bsi bricklink.SearchItem, lang language.Tag, xlocale language.Tag) (SearchResponseType, interface{}, bool) {
 
+	// Get the element ID and design ID from the BrickLink search item
+	elementID, designID := brick.GetIDsFromBricklinkSearchItem(bsi)
+
+	// If both element ID and design ID are empty, log an error and skip this item
+	// This should not happen, as we should have at least one of them, but we want to be safe and avoid processing invalid data
+	if elementID == "" && designID == "" {
+		zap.L().Error("Failed to extract element ID and design ID from BrickLink search item",
+			zap.String("strItemNo", bsi.StrItemNo),
+			zap.String("strPCC", func() string {
+				if bsi.StrPCC != nil {
+					return *bsi.StrPCC
+				}
+				return "null"
+			}()),
+		)
+		return SearchResponseTypeBrickElement, brick.Locale{}, false
+	}
+
+	// This can occur if the search input is not an element ID but a design ID
+	if elementID == "" {
+		data, err := handleBricklinkBrickByDesignID(ctx, designID, lang, xlocale)
+		return SearchResponseTypeBrickDesign, data, err
+	}
+
+	data, err := handleBricklinkBrickByElementID(ctx, elementID, designID, lang, xlocale)
+	return SearchResponseTypeBrickElement, data, err
+}
+
+// handleBricklinkBrickByDesignID fetches brick details from BrickLink using the design ID, maps it to internal representation, caches it, and returns the brick locale
+func handleBricklinkBrickByDesignID(ctx context.Context, designID brick.DesignID, lang language.Tag, xlocale language.Tag) (brick.Design, bool) {
+	// Check cache by design ID
+	design, err := brick.RedisGetDesign(ctx, designID, xlocale)
+	if err != nil && !errors.Is(err, redis.ErrKeyNotFound) {
+		// An error has occurred, it's not a cache miss (not found) => log and skip caching for this item
+		zap.L().Error("Failed to check design in Redis cache",
+			zap.Error(err),
+			zap.String("design_id", string(designID)),
+		)
+		return brick.Design{}, false
+	}
+
+	// Found in cache and data complete, return it
+	if err == nil && design.DesignStatus >= brick.DesignStatusMinimal {
+		return design, true
+	}
+
+	design.DesignID = designID
+
+	// Not found in cache, fetch it and cache it
+	err = design.FetchMinimal(ctx, lang, xlocale)
+	if err != nil {
+		return brick.Design{}, false
+	}
+
+	return design, true
+}
+
+// handleBricklinkBrickByElementID fetches brick details from BrickLink using the element ID, maps it to internal representation, caches it, and returns the brick locale
+func handleBricklinkBrickByElementID(ctx context.Context, elementID brick.ElementID, designID brick.DesignID, lang language.Tag, xlocale language.Tag) (brick.Locale, bool) {
 	// Build a minimal brick locale version
 	bLocale := brick.Locale{}
 	bLocale.ElementID = &elementID
@@ -242,11 +300,11 @@ func handleSearchResultBricklinkBrick(ctx context.Context, bsi bricklink.SearchI
 	// Not found in cache
 
 	// Query BrickLink for brick details
-	bricklinkBrick, err := bricklink.C().FetchBrickDetails(string(elementID), lang)
+	bricklinkBrick, err := bricklink.C().FetchBrickDetails(string(designID), lang)
 	if err != nil {
 		zap.L().Error("Failed to fetch brick details from BrickLink",
 			zap.Error(err),
-			zap.String("element_id", string(elementID)),
+			zap.String("design_id", string(designID)),
 		)
 		return brick.Locale{}, false
 	}
@@ -259,15 +317,13 @@ func handleSearchResultBricklinkBrick(ctx context.Context, bsi bricklink.SearchI
 		Core: bCore,
 	}
 
-	// TODO : bricklink returns design ID's ?
-
 	ok, _, _ := bLocale.Fetch(ctx, elementID, lang, xlocale)
 	if !ok {
 		return brick.Locale{}, false
 	}
 
 	// Cache the brick details in Redis for future searches and lookups
-	err = brick.RedisSet(ctx, bLocale, xlocale, true)
+	err = brick.RedisSetLocale(ctx, bLocale, xlocale, true)
 	if err != nil {
 		zap.L().Error("Failed to cache brick in Redis",
 			zap.Error(err),
@@ -276,7 +332,12 @@ func handleSearchResultBricklinkBrick(ctx context.Context, bsi bricklink.SearchI
 		// Not a critical error, we can still return the data without caching
 	}
 
-	// TODO : the problem is that this updates only the matching brick with element ID, and not the others elementID's
+	// TODO : use uuid pair (designID + elementID) ?
+	// main field, and the others as alternates in a slice or map ?
+	// how do we handle updates to slice or map to not override data that was updated by another goroutine?
+
+	// TODO : the problem is that this updates only the matching brick with element ID
+	// does not handle same design ID but different element ID, nor set bricks
 
 	return bLocale, true
 }

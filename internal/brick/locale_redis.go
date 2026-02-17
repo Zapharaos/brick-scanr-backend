@@ -13,14 +13,14 @@ import (
 	"golang.org/x/text/language"
 )
 
-// RedisBuildKey constructs a Redis key for a given ElementID and tag
-func RedisBuildKey(elementID ElementID, tag language.Tag) string {
+// RedisBuildKeyLocale constructs a Redis key for a given ElementID and tag
+func RedisBuildKeyLocale(elementID ElementID, tag language.Tag) string {
 	return fmt.Sprintf("brick:%s:%s", elementID, tag.String())
 }
 
-// RedisGet retrieves a Brick from Redis by its ElementID and tag
-func RedisGet(ctx context.Context, elementID ElementID, tag language.Tag) (Locale, error) {
-	key := RedisBuildKey(elementID, tag)
+// RedisGetLocale retrieves a Brick from Redis by its ElementID and tag
+func RedisGetLocale(ctx context.Context, elementID ElementID, tag language.Tag) (Locale, error) {
+	key := RedisBuildKeyLocale(elementID, tag)
 	data, err := redis.Get(ctx, key, true)
 	if err != nil && !errors.Is(err, redis.ErrKeyNotFound) {
 		zap.L().Error(
@@ -47,8 +47,8 @@ func RedisGet(ctx context.Context, elementID ElementID, tag language.Tag) (Local
 	return brick, nil
 }
 
-// RedisSet stores a Brick in Redis by its ElementID and tag
-func RedisSet(ctx context.Context, brick Locale, tag language.Tag, updateTTL bool) error {
+// RedisSetLocale stores a Brick in Redis by its ElementID and tag
+func RedisSetLocale(ctx context.Context, brick Locale, tag language.Tag, updateTTL bool) error {
 	id, err := brick.GetID()
 	if err != nil {
 		zap.L().Error("failed to get brick ID for redis",
@@ -68,7 +68,7 @@ func RedisSet(ctx context.Context, brick Locale, tag language.Tag, updateTTL boo
 		return err
 	}
 
-	key := RedisBuildKey(id, tag)
+	key := RedisBuildKeyLocale(id, tag)
 
 	// Determine GetTTL
 	var ttl time.Duration

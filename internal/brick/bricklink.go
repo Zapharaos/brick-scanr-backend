@@ -47,6 +47,8 @@ func MapFromBricklinkInventoryItem(core Core, bi bricklink.InventoryItem) (Core,
 func NewCoreFromBricklinkBrick(b *bricklink.Brick) Core {
 	var core Core
 
+	// TODO : design ID's instead of element ID's
+
 	// Set element IDs
 	elementID := ElementID(b.ItemNo)
 	core.ElementID = &elementID
@@ -72,4 +74,27 @@ func NewCoreFromBricklinkBrick(b *bricklink.Brick) Core {
 	core.ImageURL = b.ImageURL
 
 	return core
+}
+
+// GetIDsFromBricklinkSearchItem extracts the ElementID and DesignID from a Bricklink SearchItem
+func GetIDsFromBricklinkSearchItem(bsi bricklink.SearchItem) (ElementID, DesignID) {
+	var elementID ElementID
+	if bsi.StrPCC != nil {
+		// Extract the numeric part before the parentheses
+
+		// B : "strItemNo": "2780", "strPCC": "278026(11)"
+		// strItemNo is the Design ID, parse strPCC to get the element ID
+		// we could get the color code as well from the parentheses, but we don't need it for now
+
+		pccParts := strings.Split(*bsi.StrPCC, "(")
+		if len(pccParts) > 0 {
+			elementID = ElementID(pccParts[0])
+		}
+	}
+
+	// A : "strItemNo": "4073", "strPCC": null
+	// strItemNo is the Design ID, we have no element ID
+	designID := DesignID(bsi.StrItemNo)
+
+	return elementID, designID
 }
