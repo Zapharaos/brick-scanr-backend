@@ -15,6 +15,8 @@ import (
 	"golang.org/x/text/language"
 )
 
+// TODO : design ID 4085d doesnt have png for brick yellow 635222 but should have it
+
 // FetchBrickDetailsByElement godoc
 //
 //	@Id				FetchBrickDetailsByElement
@@ -42,20 +44,14 @@ func (h Handler) FetchBrickDetailsByElement(w http.ResponseWriter, r *http.Reque
 
 	// Build a minimal brick locale version
 	elementID := brick.ElementID(id)
-	bLocale := brick.Locale{}
-	bLocale.ID.ElementID = elementID
 
 	// Search for the brick locale in cache
-	var valid, notfound bool
-	bLocale, valid, notfound = bLocale.LoadFromRedis(r.Context(), elementID, xlocale, false, false)
-
-	// Brick locale already cached, return it
-	if valid || notfound {
+	if bLocale, err := brick.RedisGetLocale(r.Context(), elementID, xlocale); err == nil {
 		render.JSON(w, r, bLocale)
 		return
 	}
 
-	// Not found in cache
+	// TODO : Not found in cache : must run a search query
 
 	// Query BrickLink for brick details
 	bricklinkBrick, err := bricklink.C().FetchBrickDetails(string(elementID), lang)
@@ -64,11 +60,13 @@ func (h Handler) FetchBrickDetailsByElement(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// TODO : found ? get design ID's
+
 	// Map BrickLink brick details to internal representation
 	bCore := brick.NewCoreFromBricklinkBrick(bricklinkBrick)
 
 	// Create brick locale with the core data
-	bLocale = brick.Locale{
+	bLocale := brick.Locale{
 		Core: bCore,
 	}
 
@@ -124,9 +122,76 @@ func (h Handler) FetchBrickDetailsByDesign(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if mainDesign.DesignStatus != brick.DesignStatusComplete {
+		// Status not being complete here means it was not found on Bricklink
+		// This implies that the requested design ID is not the main design ID for this brick
+		// But we could be able to retrieve it the main one by performing a search query with the design ID
+
+		_, bricklinkBricks, err := bricklink.C().Search(id, lang)
+		if err != nil {
+			zap.L().Error("Failed to search responseItems",
+				zap.Error(err),
+				zap.String("query", id),
+			)
+			render.Error(w, r, err, "Failed to search BrickLink")
+			return
+		}
+
+		// No results found, or multiple results found, we cannot be sure which one is the correct one, return not found
+		if len(bricklinkBricks) == 0 || len(bricklinkBricks) > 1 {
+			render.NotFound(w, r, fmt.Errorf("design not found on BrickLink"))
+			return
+		}
+
+		// Get the design ID from the BrickLink search item
+		designID := brick.GetDesignIDFromBricklinkSearchItem(bricklinkBricks[0])
+
+		// Fetch the design details for the main design ID
+		design, ok := handleBricklinkBrickByDesignID(r.Context(), designID, lang, xlocale)
+		if !ok || design.DesignStatus < brick.DesignStatusMinimal {
+			render.NotFound(w, r, fmt.Errorf("design not found on BrickLink"))
+			return
+		}
+
+		// Cache the main design
+		err = brick.RedisSetDesign(r.Context(), design, xlocale, true)
+		if err != nil {
+			zap.L().Error("Failed to cache design in Redis",
+				zap.Error(err),
+				zap.String("design_id", string(design.ID.DesignID)),
+			)
+			// Not a critical error, we can still return the data without caching
+		}
+
+		// Use the fetched design as the main one, but replace with the requested design ID data
+		for i, alternateID := range design.Alternates {
+			if alternateID == brick.DesignID(id) {
+				design.Alternates[i] = design.ID.DesignID
+				break
+			}
+		}
+		mainDesign.Alternates = design.Alternates
+		mainDesign.ID.DesignID = brick.DesignID(id)
+
+		// Cache the requested design
+		err = brick.RedisSetDesign(r.Context(), design, xlocale, true)
+		if err != nil {
+			zap.L().Error("Failed to cache design in Redis",
+				zap.Error(err),
+				zap.String("design_id", string(design.ID.DesignID)),
+			)
+			// Not a critical error, we can still return the data without caching
+		}
+	}
+
 	// Create a design index to hold the main design and its alternates
 	designIndex := make(brick.DesignIndex)
 	designIndex[mainDesign.Design.ID.DesignID] = &mainDesign
+
+	var defaultDesign brick.Design
+	if mainDesign.Core.ID != nil {
+		defaultDesign = mainDesign.Design
+	}
 
 	// Iterate over each design ID
 	for _, alternateDesignID := range mainDesign.Alternates {
@@ -134,26 +199,40 @@ func (h Handler) FetchBrickDetailsByDesign(w http.ResponseWriter, r *http.Reques
 		var alternateDesign brick.DesignWithBricks
 
 		// Fetch the design details
-		alternateDesign, err = fetchDesign(r.Context(), alternateDesignID, lang, xlocale)
+		alternateDesign, err = fetchDesignWithDefault(r.Context(), alternateDesignID, lang, xlocale, defaultDesign)
 		if err != nil {
 			render.Error(w, r, err, "Failed to fetch design details")
 			return
+		}
+
+		if defaultDesign.ID == nil && alternateDesign.Core.ID != nil {
+			defaultDesign = alternateDesign.Design
 		}
 
 		// Add the alternate design to the index
 		designIndex[alternateDesign.Design.ID.DesignID] = &alternateDesign
 	}
 
-	// TODO : provide a price range ? no status ? special label ? a dropdown to see every element IDs !!!
 	render.JSON(w, r, designIndex)
 }
 
-// fetchDesign is a helper function to fetch the design details by design ID, it will check the cache first and if not found, it will fetch the data from BrickLink and pick-a-brick API, then cache the data for future lookups. It will also handle the different design status (minimal or complete) to optimize the fetching process.
+// fetchDesignWithDefaultCore is a helper function to fetch the design details by design ID, it will check the cache first and if not found, it will fetch the data from BrickLink and pick-a-brick API, then cache the data for future lookups. It will also handle the different design status (minimal or complete) to optimize the fetching process.
 func fetchDesign(
 	ctx context.Context,
 	designID brick.DesignID,
 	lang language.Tag,
 	xlocale language.Tag,
+) (brick.DesignWithBricks, error) {
+	return fetchDesignWithDefault(ctx, designID, lang, xlocale, brick.Design{})
+}
+
+// fetchDesignWithDefaultCore is a helper function to fetch the design details by design ID, it will check the cache first and if not found, it will fetch the data from BrickLink and pick-a-brick API, then cache the data for future lookups. It will also handle the different design status (minimal or complete) to optimize the fetching process.
+func fetchDesignWithDefault(
+	ctx context.Context,
+	designID brick.DesignID,
+	lang language.Tag,
+	xlocale language.Tag,
+	defaultDesign brick.Design,
 ) (brick.DesignWithBricks, error) {
 	// Check cache by design ID
 	design, err := brick.RedisGetDesign(ctx, designID, xlocale)
@@ -166,6 +245,32 @@ func fetchDesign(
 		return brick.DesignWithBricks{}, err
 	}
 
+	id := brick.ID{
+		DesignID: designID,
+	}
+
+	// Design was not found, apply the default core data
+	if err != nil && defaultDesign.DesignStatus != brick.DesignStatusUnknown {
+		design = defaultDesign
+
+		// Reset those fields
+		design.ElementIDs = nil
+		design.DesignStatus = brick.DesignStatusUnknown
+
+		// Rebuild the alternates slice around the design ID
+		design.Alternates = []brick.DesignID{}
+		/*if defaultDesign.ID != nil {
+			design.Alternates = append(design.Alternates, defaultDesign.ID.DesignID)
+		}*/
+		for _, alternateID := range defaultDesign.Alternates {
+			if alternateID != designID {
+				design.Alternates = append(design.Alternates, alternateID)
+			}
+		}
+	}
+
+	design.ID = &id
+
 	// Note: in order to fetch the data related to a design ID, we have the following options:
 	// option 1 : fetch by design ID, update element ID's cache entries if applicable
 
@@ -176,8 +281,6 @@ func fetchDesign(
 	// to fetch by design ID
 
 	var bricks []brick.Locale
-	design = brick.Design{}
-	design.ID.DesignID = designID
 
 	switch design.DesignStatus {
 
@@ -192,6 +295,14 @@ func fetchDesign(
 			)
 			return brick.DesignWithBricks{}, err
 		}
+
+	case brick.DesignStatusBricksNotFound:
+		// Design is not found, we can return early with an empty bricks list
+
+		return brick.DesignWithBricks{
+			Design: design,
+			Bricks: []brick.Locale{},
+		}, nil
 
 	// Design data is complete - make sure we have the latest data for each element ID and related brick locale
 	//case brick.DesignStatusComplete:

@@ -10,6 +10,9 @@ import (
 	"golang.org/x/text/language"
 )
 
+// TODO : 21043 first load has duplicates for invalid ones
+// TODO : also has 163 references not found but progress counts 160
+
 type CacheStatus int
 
 const (

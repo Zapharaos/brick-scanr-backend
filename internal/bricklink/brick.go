@@ -1,6 +1,7 @@
 package bricklink
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,9 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/text/language"
 )
+
+// ErrBrickNotFound is returned when a brick is not found on BrickLink
+var ErrBrickNotFound = errors.New("brick not found on BrickLink")
 
 // Brick represents brick details fetched from BrickLink
 type Brick struct {
@@ -74,6 +78,41 @@ func (c *Client) FetchBrickDetails(itemID string, lang language.Tag) (*Brick, er
 
 // parseBrickDetails extracts brick information from the HTML response
 func parseBrickDetails(html, itemID string) (*Brick, error) {
+	// Check if this is a "no results found" page (search results page instead of catalog page)
+	// This happens when the item doesn't exist or the URL redirects to a search
+
+	// Multiple indicators that the item was not found:
+
+	// 1. "Page Not Found" title (classic error page)
+	if strings.Contains(html, `<title>BrickLink Page Not Found</title>`) {
+		return nil, fmt.Errorf("%w: BrickLink returned 'Page Not Found' for ID %s", ErrBrickNotFound, itemID)
+	}
+
+	// 2. "No Item(s) were found" message (classic error page)
+	if strings.Contains(html, `No Item(s) were found`) || strings.Contains(html, `No Item(s) were found.  Please try again!`) {
+		return nil, fmt.Errorf("%w: no items found for ID %s", ErrBrickNotFound, itemID)
+	}
+
+	// 3. Page title indicates search results (search page format)
+	if strings.Contains(html, `<title>Search result for`) || strings.Contains(html, `BrickLink Search | BrickLink</title>`) {
+		return nil, fmt.Errorf("%w: no matching items for ID %s", ErrBrickNotFound, itemID)
+	}
+
+	// 4. "All Item Search: Results for" text in the page
+	if strings.Contains(html, `All Item Search: Results for`) {
+		return nil, fmt.Errorf("%w: BrickLink returned search results instead of catalog page for ID %s", ErrBrickNotFound, itemID)
+	}
+
+	// 5. "idNoResults" element present
+	if strings.Contains(html, `id="idNoResults"`) {
+		return nil, fmt.Errorf("%w: no matching items for ID %s", ErrBrickNotFound, itemID)
+	}
+
+	// 6. "We couldn't match" error message
+	if strings.Contains(html, "We couldn't match") || strings.Contains(html, "Uh oh!") {
+		return nil, fmt.Errorf("%w: no matching items for ID %s", ErrBrickNotFound, itemID)
+	}
+
 	brick := &Brick{
 		ItemNo: itemID,
 	}

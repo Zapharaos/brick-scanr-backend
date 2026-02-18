@@ -245,12 +245,12 @@ func handleSearchResultBricklinkBrick(ctx context.Context, bsi bricklink.SearchI
 
 	// This can occur if the search input is not an element ID but a design ID
 	if elementID == "" {
-		data, err := handleBricklinkBrickByDesignID(ctx, designID, lang, xlocale)
-		return SearchResponseTypeBrickDesign, data, err
+		data, ok := handleBricklinkBrickByDesignID(ctx, designID, lang, xlocale)
+		return SearchResponseTypeBrickDesign, data, ok
 	}
 
-	data, err := handleBricklinkBrickByElementID(ctx, elementID, designID, lang, xlocale)
-	return SearchResponseTypeBrickElement, data, err
+	data, ok := handleBricklinkBrickByElementID(ctx, elementID, designID, lang, xlocale)
+	return SearchResponseTypeBrickElement, data, ok
 }
 
 // handleBricklinkBrickByDesignID fetches brick details from BrickLink using the design ID, maps it to internal representation, caches it, and returns the brick locale
@@ -267,11 +267,16 @@ func handleBricklinkBrickByDesignID(ctx context.Context, designID brick.DesignID
 	}
 
 	// Found in cache and data complete, return it
-	if err == nil && design.DesignStatus >= brick.DesignStatusMinimal {
+	if err == nil &&
+		design.DesignStatus >= brick.DesignStatusMinimal &&
+		design.DesignStatus != brick.DesignStatusBricks {
 		return design, true
 	}
 
-	design.ID.DesignID = designID
+	id := brick.ID{
+		DesignID: designID,
+	}
+	design.ID = &id
 
 	// Not found in cache, fetch it and cache it
 	err = design.FetchMinimal(ctx, lang, xlocale)
@@ -286,7 +291,9 @@ func handleBricklinkBrickByDesignID(ctx context.Context, designID brick.DesignID
 func handleBricklinkBrickByElementID(ctx context.Context, elementID brick.ElementID, designID brick.DesignID, lang language.Tag, xlocale language.Tag) (brick.Locale, bool) {
 	// Build a minimal brick locale version
 	bLocale := brick.Locale{}
-	bLocale.ID.ElementID = elementID
+	bLocale.ID = &brick.ID{
+		ElementID: elementID,
+	}
 
 	// Search for the brick locale in cache
 	var valid, notfound bool
@@ -316,7 +323,7 @@ func handleBricklinkBrickByElementID(ctx context.Context, elementID brick.Elemen
 	bLocale = brick.Locale{
 		Core: bCore,
 	}
-
+	// TODO : if any IDs match ID.design ID, then update element ID there
 	ok, _, _ := bLocale.Fetch(ctx, elementID, lang, xlocale)
 	if !ok {
 		return brick.Locale{}, false

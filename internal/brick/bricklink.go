@@ -84,6 +84,20 @@ func NewCoreFromBricklinkBrick(b *bricklink.Brick) Core {
 
 // GetIDsFromBricklinkSearchItem extracts the ElementID and DesignID from a Bricklink SearchItem
 func GetIDsFromBricklinkSearchItem(bsi bricklink.SearchItem) (ElementID, DesignID) {
+	elementID := GetElementIDFromBricklinkSearchItem(bsi)
+	designID := GetDesignIDFromBricklinkSearchItem(bsi)
+	return elementID, designID
+}
+
+// GetDesignIDFromBricklinkSearchItem extracts the DesignID from a Bricklink SearchItem
+func GetDesignIDFromBricklinkSearchItem(bsi bricklink.SearchItem) DesignID {
+	// A : "strItemNo": "4073", "strPCC": null
+	// strItemNo is the Design ID, we have no element ID
+	return DesignID(bsi.StrItemNo)
+}
+
+// GetElementIDFromBricklinkSearchItem extracts the ElementID from a Bricklink SearchItem, if available
+func GetElementIDFromBricklinkSearchItem(bsi bricklink.SearchItem) ElementID {
 	var elementID ElementID
 	if bsi.StrPCC != nil {
 		// Extract the numeric part before the parentheses
@@ -98,9 +112,5 @@ func GetIDsFromBricklinkSearchItem(bsi bricklink.SearchItem) (ElementID, DesignI
 		}
 	}
 
-	// A : "strItemNo": "4073", "strPCC": null
-	// strItemNo is the Design ID, we have no element ID
-	designID := DesignID(bsi.StrItemNo)
-
-	return elementID, designID
+	return elementID
 }
