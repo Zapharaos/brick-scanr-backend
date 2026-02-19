@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/brick"
-	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
 	"github.com/Zapharaos/brick-scanr-backend/internal/handlers/render"
 	"github.com/Zapharaos/brick-scanr-backend/internal/redis"
 	"github.com/go-chi/chi/v5"
@@ -35,25 +34,21 @@ type BrickByElementIDResponse struct {
 //	@Failure		400	{object}	render.ErrorResponse		"Bad Request"
 //	@Failure		404	{object}	render.ErrorResponse		"Not found"
 //	@Router			/api/v1/brick/details/element/{id} [get]
-func (h Handler) FetchBrickDetailsByElement(w http.ResponseWriter, r *http.Request) {
+func FetchBrickDetailsByElement(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		render.BadRequest(w, r, fmt.Errorf("id parameter is required"))
 		return
 	}
 
-	// Extract language + xlocale from context
-	lang := GetLanguageFromContext(r)
-	xlocale := GetXLocaleFromContext(r)
-
 	// Build a minimal brick locale version
 	elementID := brick.ElementID(id)
 
 	// Search for the brick locale in cache
-	if bLocale, err := brick.RedisGetLocale(r.Context(), elementID, xlocale); err == nil {
+	if bLocale, err := brick.RedisGetLocale(r.Context(), elementID, GetXLocaleFromContext(r)); err == nil {
 
 		// Fetch the design details for the brick design ID
-		designIndex, ok := h.fetchDesignIndexByDesignID(w, r, bLocale.ID.DesignID)
+		designIndex, ok := fetchDesignIndexByDesignID(w, r, bLocale.ID.DesignID)
 		if !ok {
 			// The helper function already rendered the error response, we can just return here
 			return
@@ -66,41 +61,17 @@ func (h Handler) FetchBrickDetailsByElement(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// TODO : Not found in cache : must run a search query
-
-	// Query BrickLink for brick details
-	bricklinkBrick, err := bricklink.C().FetchBrickDetails(string(elementID), lang)
-	if err != nil {
-		render.Error(w, r, err, "Failed to fetch brick details from BrickLink")
-		return
-	}
-
-	// Map BrickLink brick details to internal representation
-	bCore := brick.NewCoreFromBricklinkBrick(bricklinkBrick)
-
-	// Create brick locale with the core data
-	bLocale := brick.Locale{
-		Core: bCore,
-	}
-
-	// Fetch data from pick-a-brick API
-	ok, _, _ := bLocale.Fetch(r.Context(), elementID, lang, xlocale)
+	// Not found in cache : must run a search query first
+	bLocale, designIndex, ok := searchBrickByElementID(w, r, elementID)
 	if !ok {
-		render.NotFound(w, r, fmt.Errorf("brick details not found on pick-a-brick API"))
+		// The helper function already rendered the error response, we can just return here
 		return
 	}
 
-	// Cache the brick details in Redis for future searches and lookups
-	err = brick.RedisSetLocale(r.Context(), bLocale, xlocale, true)
-	if err != nil {
-		zap.L().Error("Failed to cache brick in Redis",
-			zap.Error(err),
-			zap.String("element_id", string(elementID)),
-		)
-		// Not a critical error, we can still return the data without caching
-	}
-
-	render.JSON(w, r, bLocale)
+	render.JSON(w, r, BrickByElementIDResponse{
+		Brick:       bLocale,
+		DesignIndex: designIndex,
+	})
 }
 
 // FetchBrickDetailsByDesign godoc
@@ -117,14 +88,14 @@ func (h Handler) FetchBrickDetailsByElement(w http.ResponseWriter, r *http.Reque
 //	@Failure		400	{object}	render.ErrorResponse		"Bad Request"
 //	@Failure		404	{object}	render.ErrorResponse		"Not found"
 //	@Router			/api/v1/brick/details/design/{id} [get]
-func (h Handler) FetchBrickDetailsByDesign(w http.ResponseWriter, r *http.Request) {
+func FetchBrickDetailsByDesign(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		render.BadRequest(w, r, fmt.Errorf("id parameter is required"))
 		return
 	}
 
-	designIndex, ok := h.fetchDesignIndexByDesignID(w, r, brick.DesignID(id))
+	designIndex, ok := fetchDesignIndexByDesignID(w, r, brick.DesignID(id))
 	if !ok {
 		// The helper function already rendered the error response, we can just return here
 		return
@@ -134,7 +105,7 @@ func (h Handler) FetchBrickDetailsByDesign(w http.ResponseWriter, r *http.Reques
 }
 
 // fetchDesignIndexByDesignID is a helper function to fetch the design details for a given design ID
-func (h Handler) fetchDesignIndexByDesignID(w http.ResponseWriter, r *http.Request, designID brick.DesignID) (brick.DesignIndex, bool) {
+func fetchDesignIndexByDesignID(w http.ResponseWriter, r *http.Request, designID brick.DesignID) (brick.DesignIndex, bool) {
 	// Extract data
 	lang := GetLanguageFromContext(r)
 	xlocale := GetXLocaleFromContext(r)
@@ -151,61 +122,12 @@ func (h Handler) fetchDesignIndexByDesignID(w http.ResponseWriter, r *http.Reque
 		// This implies that the requested design ID is not the main design ID for this brick
 		// But we could be able to retrieve it the main one by performing a search query with the design ID
 
-		_, bricklinkBricks, err := bricklink.C().Search(string(designID), lang)
-		if err != nil {
-			zap.L().Error("Failed to search responseItems",
-				zap.Error(err),
-				zap.String("query", string(designID)),
-			)
-			render.Error(w, r, err, "Failed to search BrickLink")
+		design, ok := searchBrickByDesignID(w, r, designID, mainDesign)
+		if !ok {
 			return nil, false
 		}
 
-		// No results found, or multiple results found, we cannot be sure which one is the correct one, return not found
-		if len(bricklinkBricks) == 0 || len(bricklinkBricks) > 1 {
-			render.NotFound(w, r, fmt.Errorf("design not found on BrickLink"))
-			return nil, false
-		}
-
-		// Get the design ID from the BrickLink search item
-		resDesignID := brick.GetDesignIDFromBricklinkSearchItem(bricklinkBricks[0])
-
-		// Fetch the design details for the main design ID
-		design, ok := handleBricklinkBrickByDesignID(r.Context(), resDesignID, lang, xlocale)
-		if !ok || design.DesignStatus < brick.DesignStatusMinimal {
-			render.NotFound(w, r, fmt.Errorf("design not found on BrickLink"))
-			return nil, false
-		}
-
-		// Cache the main design
-		err = brick.RedisSetDesign(r.Context(), design, xlocale, true)
-		if err != nil {
-			zap.L().Error("Failed to cache design in Redis",
-				zap.Error(err),
-				zap.String("design_id", string(design.ID.DesignID)),
-			)
-			// Not a critical error, we can still return the data without caching
-		}
-
-		// Use the fetched design as the main one, but replace with the requested design ID data
-		for i, alternateID := range design.Alternates {
-			if alternateID == designID {
-				design.Alternates[i] = design.ID.DesignID
-				break
-			}
-		}
-		mainDesign.Alternates = design.Alternates
-		mainDesign.ID.DesignID = designID
-
-		// Cache the requested design
-		err = brick.RedisSetDesign(r.Context(), design, xlocale, true)
-		if err != nil {
-			zap.L().Error("Failed to cache design in Redis",
-				zap.Error(err),
-				zap.String("design_id", string(design.ID.DesignID)),
-			)
-			// Not a critical error, we can still return the data without caching
-		}
+		mainDesign = design
 	}
 
 	// Create a design index to hold the main design and its alternates
@@ -294,6 +216,7 @@ func fetchDesignWithDefault(
 	}
 
 	design.ID = &id
+	design.IDs = defaultDesign.IDs
 
 	// Note: in order to fetch the data related to a design ID, we have the following options:
 	// option 1 : fetch by design ID, update element ID's cache entries if applicable

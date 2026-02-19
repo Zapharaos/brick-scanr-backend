@@ -11,7 +11,7 @@ import (
 	"golang.org/x/text/language"
 )
 
-// Search searches for LEGO elements on BrickLink
+// Search for LEGO elements on BrickLink
 func (c *Client) Search(query string, lang language.Tag) ([]SearchItem, []SearchItem, error) {
 	baseURL := "https://www.bricklink.com/ajax/clone/search/searchproduct.ajax"
 	params := url.Values{}

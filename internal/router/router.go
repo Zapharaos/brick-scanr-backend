@@ -75,7 +75,7 @@ func New(setHandler *setruntime.Handler) *Router {
 			r.Get("/details/ws/{id}", router.handler.SetDetailsWebSocket)
 
 			// Export
-			r.Post("/export/{id}", router.handler.ExportSet)
+			r.Post("/export/{id}", handlers.ExportSet)
 		})
 
 		// Brick related endpoints
@@ -85,13 +85,13 @@ func New(setHandler *setruntime.Handler) *Router {
 			r.With(httprate.LimitByIP(
 				viper.GetInt("rate_limit.brick_details.requests"),
 				viper.GetDuration("rate_limit.brick_details.window")*time.Second,
-			)).Get("/details/design/{id}", router.handler.FetchBrickDetailsByDesign)
+			)).Get("/details/design/{id}", handlers.FetchBrickDetailsByDesign)
 
 			// Details by element ID
 			r.With(httprate.LimitByIP(
 				viper.GetInt("rate_limit.brick_details.requests"),
 				viper.GetDuration("rate_limit.brick_details.window")*time.Second,
-			)).Get("/details/element/{id}", router.handler.FetchBrickDetailsByElement)
+			)).Get("/details/element/{id}", handlers.FetchBrickDetailsByElement)
 		})
 	})
 

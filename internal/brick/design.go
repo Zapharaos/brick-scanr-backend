@@ -129,11 +129,16 @@ func (d *Design) FetchBricks(ctx context.Context, lang, xlocale language.Tag) ([
 		// Map result to local representation
 		mappedB := MapLocaleFromPickabrick(Locale{}, pab, xlocale)
 
-		// TODO : apply ID and IDS to brick locale
+		// Apply design IDS to brick locale
+		mappedB.IDs = d.IDs
 
 		// Load preferred data into new instance (default to pick-a-brick data, but if cache has valid price that is lower, use that instead)
 		bLocale, valid, notfound := mappedB.LoadFromRedis(ctx, mappedB.ID.ElementID, xlocale, false, true)
 		if !valid && !notfound {
+
+			// Apply design IDS to brick locale
+			bLocale.IDs = d.IDs
+
 			// Not found in cache, cache the brick details in Redis for future searches and lookups
 			err = RedisSetLocale(ctx, bLocale, xlocale, true)
 			if err != nil {

@@ -270,7 +270,7 @@ func (h Handler) SetDetailsWebSocket(w http.ResponseWriter, r *http.Request) {
 //	@Failure		401	{string}	string					"Permission denied"
 //	@Failure		500	{object}	render.ErrorResponse	"Internal Server Error"
 //	@Router			/api/v1/set/export/{id} [post]
-func (h Handler) ExportSet(w http.ResponseWriter, r *http.Request) {
+func ExportSet(w http.ResponseWriter, r *http.Request) {
 	setId, ok := ParseParamUUIDSoft(r, "id")
 	if !ok {
 		// Param is not a UUID, might be a slug - try to resolve

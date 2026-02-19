@@ -259,6 +259,9 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 			Core: bCore,
 		})
 
+		// TODO : handle IDs ? fetch on bricklink?
+		// TODO : if not then how do we let others related ones know about the IDs ?
+
 		// When applying locales from cache, we might overwrite the IDs slice
 		// To avoid loosing data, we reset it to the original slice
 		originalIDs := bCore.IDs
