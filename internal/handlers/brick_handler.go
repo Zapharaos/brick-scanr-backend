@@ -15,7 +15,11 @@ import (
 	"golang.org/x/text/language"
 )
 
-// TODO : design ID 4085d doesnt have png for brick yellow 635222 but should have it
+// BrickByElementIDResponse represents the response structure for fetching brick details by element ID
+type BrickByElementIDResponse struct {
+	Brick       brick.Locale      `json:"brick,omitempty"`
+	DesignIndex brick.DesignIndex `json:"design_index"`
+}
 
 // FetchBrickDetailsByElement godoc
 //
@@ -27,7 +31,7 @@ import (
 //	@Produce		json
 //	@Param			id			path		string					true	"Element ID"
 //	@Security		Bearer
-//	@Success		200	{object}	brick.Locale				"Data available"
+//	@Success		200	{object}	BrickByElementIDResponse	"Data available"
 //	@Failure		400	{object}	render.ErrorResponse		"Bad Request"
 //	@Failure		404	{object}	render.ErrorResponse		"Not found"
 //	@Router			/api/v1/brick/details/element/{id} [get]
@@ -47,7 +51,18 @@ func (h Handler) FetchBrickDetailsByElement(w http.ResponseWriter, r *http.Reque
 
 	// Search for the brick locale in cache
 	if bLocale, err := brick.RedisGetLocale(r.Context(), elementID, xlocale); err == nil {
-		render.JSON(w, r, bLocale)
+
+		// Fetch the design details for the brick design ID
+		designIndex, ok := h.fetchDesignIndexByDesignID(w, r, bLocale.ID.DesignID)
+		if !ok {
+			// The helper function already rendered the error response, we can just return here
+			return
+		}
+
+		render.JSON(w, r, BrickByElementIDResponse{
+			Brick:       bLocale,
+			DesignIndex: designIndex,
+		})
 		return
 	}
 
@@ -59,8 +74,6 @@ func (h Handler) FetchBrickDetailsByElement(w http.ResponseWriter, r *http.Reque
 		render.Error(w, r, err, "Failed to fetch brick details from BrickLink")
 		return
 	}
-
-	// TODO : found ? get design ID's
 
 	// Map BrickLink brick details to internal representation
 	bCore := brick.NewCoreFromBricklinkBrick(bricklinkBrick)
@@ -111,46 +124,57 @@ func (h Handler) FetchBrickDetailsByDesign(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	designIndex, ok := h.fetchDesignIndexByDesignID(w, r, brick.DesignID(id))
+	if !ok {
+		// The helper function already rendered the error response, we can just return here
+		return
+	}
+
+	render.JSON(w, r, designIndex)
+}
+
+// fetchDesignIndexByDesignID is a helper function to fetch the design details for a given design ID
+func (h Handler) fetchDesignIndexByDesignID(w http.ResponseWriter, r *http.Request, designID brick.DesignID) (brick.DesignIndex, bool) {
 	// Extract data
 	lang := GetLanguageFromContext(r)
 	xlocale := GetXLocaleFromContext(r)
 
 	// Fetch the design details
-	mainDesign, err := fetchDesign(r.Context(), brick.DesignID(id), lang, xlocale)
+	mainDesign, err := fetchDesign(r.Context(), designID, lang, xlocale)
 	if err != nil {
 		render.Error(w, r, err, "Failed to fetch design details")
-		return
+		return nil, false
 	}
 
-	if mainDesign.DesignStatus != brick.DesignStatusComplete {
+	if mainDesign.DesignStatus != brick.DesignStatusComplete && mainDesign.DesignStatus != brick.DesignStatusBricksNotFound {
 		// Status not being complete here means it was not found on Bricklink
 		// This implies that the requested design ID is not the main design ID for this brick
 		// But we could be able to retrieve it the main one by performing a search query with the design ID
 
-		_, bricklinkBricks, err := bricklink.C().Search(id, lang)
+		_, bricklinkBricks, err := bricklink.C().Search(string(designID), lang)
 		if err != nil {
 			zap.L().Error("Failed to search responseItems",
 				zap.Error(err),
-				zap.String("query", id),
+				zap.String("query", string(designID)),
 			)
 			render.Error(w, r, err, "Failed to search BrickLink")
-			return
+			return nil, false
 		}
 
 		// No results found, or multiple results found, we cannot be sure which one is the correct one, return not found
 		if len(bricklinkBricks) == 0 || len(bricklinkBricks) > 1 {
 			render.NotFound(w, r, fmt.Errorf("design not found on BrickLink"))
-			return
+			return nil, false
 		}
 
 		// Get the design ID from the BrickLink search item
-		designID := brick.GetDesignIDFromBricklinkSearchItem(bricklinkBricks[0])
+		resDesignID := brick.GetDesignIDFromBricklinkSearchItem(bricklinkBricks[0])
 
 		// Fetch the design details for the main design ID
-		design, ok := handleBricklinkBrickByDesignID(r.Context(), designID, lang, xlocale)
+		design, ok := handleBricklinkBrickByDesignID(r.Context(), resDesignID, lang, xlocale)
 		if !ok || design.DesignStatus < brick.DesignStatusMinimal {
 			render.NotFound(w, r, fmt.Errorf("design not found on BrickLink"))
-			return
+			return nil, false
 		}
 
 		// Cache the main design
@@ -165,13 +189,13 @@ func (h Handler) FetchBrickDetailsByDesign(w http.ResponseWriter, r *http.Reques
 
 		// Use the fetched design as the main one, but replace with the requested design ID data
 		for i, alternateID := range design.Alternates {
-			if alternateID == brick.DesignID(id) {
+			if alternateID == designID {
 				design.Alternates[i] = design.ID.DesignID
 				break
 			}
 		}
 		mainDesign.Alternates = design.Alternates
-		mainDesign.ID.DesignID = brick.DesignID(id)
+		mainDesign.ID.DesignID = designID
 
 		// Cache the requested design
 		err = brick.RedisSetDesign(r.Context(), design, xlocale, true)
@@ -202,7 +226,7 @@ func (h Handler) FetchBrickDetailsByDesign(w http.ResponseWriter, r *http.Reques
 		alternateDesign, err = fetchDesignWithDefault(r.Context(), alternateDesignID, lang, xlocale, defaultDesign)
 		if err != nil {
 			render.Error(w, r, err, "Failed to fetch design details")
-			return
+			return nil, false
 		}
 
 		if defaultDesign.ID == nil && alternateDesign.Core.ID != nil {
@@ -213,7 +237,7 @@ func (h Handler) FetchBrickDetailsByDesign(w http.ResponseWriter, r *http.Reques
 		designIndex[alternateDesign.Design.ID.DesignID] = &alternateDesign
 	}
 
-	render.JSON(w, r, designIndex)
+	return designIndex, true
 }
 
 // fetchDesignWithDefaultCore is a helper function to fetch the design details by design ID, it will check the cache first and if not found, it will fetch the data from BrickLink and pick-a-brick API, then cache the data for future lookups. It will also handle the different design status (minimal or complete) to optimize the fetching process.

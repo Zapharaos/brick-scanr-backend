@@ -243,13 +243,23 @@ func handleSearchResultBricklinkBrick(ctx context.Context, bsi bricklink.SearchI
 		return SearchResponseTypeBrickElement, brick.Locale{}, false
 	}
 
+	// First try to find the design by design ID
+	design, ok := handleBricklinkBrickByDesignID(ctx, designID, lang, xlocale)
+
 	// This can occur if the search input is not an element ID but a design ID
+	// Check must be run before checkin ok boolean, we need to be sure of the search response type
 	if elementID == "" {
-		data, ok := handleBricklinkBrickByDesignID(ctx, designID, lang, xlocale)
-		return SearchResponseTypeBrickDesign, data, ok
+		return SearchResponseTypeBrickDesign, design, ok
 	}
 
-	data, ok := handleBricklinkBrickByElementID(ctx, elementID, designID, lang, xlocale)
+	// Search input is an element ID, but we failed to find the design
+	if !ok {
+		return SearchResponseTypeBrickElement, design, ok
+	}
+
+	// We have a design, we can try to find the brick locale by element ID
+	design.ID.ElementID = elementID
+	data, ok := handleBricklinkBrickByElementID(ctx, design.Core, lang, xlocale)
 	return SearchResponseTypeBrickElement, data, ok
 }
 
@@ -288,53 +298,34 @@ func handleBricklinkBrickByDesignID(ctx context.Context, designID brick.DesignID
 }
 
 // handleBricklinkBrickByElementID fetches brick details from BrickLink using the element ID, maps it to internal representation, caches it, and returns the brick locale
-func handleBricklinkBrickByElementID(ctx context.Context, elementID brick.ElementID, designID brick.DesignID, lang language.Tag, xlocale language.Tag) (brick.Locale, bool) {
+func handleBricklinkBrickByElementID(ctx context.Context, designCore brick.Core, lang language.Tag, xlocale language.Tag) (brick.Locale, bool) {
 	// Build a minimal brick locale version
 	bLocale := brick.Locale{}
-	bLocale.ID = &brick.ID{
-		ElementID: elementID,
-	}
+	bLocale.Core = designCore
 
 	// Search for the brick locale in cache
 	var valid, notfound bool
-	bLocale, valid, notfound = bLocale.LoadFromRedis(ctx, elementID, xlocale, false, false)
+	bLocale, valid, notfound = bLocale.LoadFromRedis(ctx, bLocale.ID.ElementID, xlocale, false, false)
 
 	// Brick locale already cached, return it
 	if valid || notfound {
+		// TODO : should merge IDs and Design if applicable, but not if cached correctly upon set load
 		return bLocale, true
 	}
 
 	// Not found in cache
 
-	// Query BrickLink for brick details
-	bricklinkBrick, err := bricklink.C().FetchBrickDetails(string(designID), lang)
-	if err != nil {
-		zap.L().Error("Failed to fetch brick details from BrickLink",
-			zap.Error(err),
-			zap.String("design_id", string(designID)),
-		)
-		return brick.Locale{}, false
-	}
-
-	// Map BrickLink brick details to internal representation
-	bCore := brick.NewCoreFromBricklinkBrick(bricklinkBrick)
-
-	// Create brick locale with the core data
-	bLocale = brick.Locale{
-		Core: bCore,
-	}
-	// TODO : if any IDs match ID.design ID, then update element ID there
-	ok, _, _ := bLocale.Fetch(ctx, elementID, lang, xlocale)
+	ok, _, _ := bLocale.Fetch(ctx, bLocale.ID.ElementID, lang, xlocale)
 	if !ok {
 		return brick.Locale{}, false
 	}
 
 	// Cache the brick details in Redis for future searches and lookups
-	err = brick.RedisSetLocale(ctx, bLocale, xlocale, true)
+	err := brick.RedisSetLocale(ctx, bLocale, xlocale, true)
 	if err != nil {
 		zap.L().Error("Failed to cache brick in Redis",
 			zap.Error(err),
-			zap.String("element_id", string(elementID)),
+			zap.String("element_id", string(bLocale.ID.ElementID)),
 		)
 		// Not a critical error, we can still return the data without caching
 	}

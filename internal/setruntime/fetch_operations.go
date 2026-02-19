@@ -15,8 +15,6 @@ import (
 	"golang.org/x/text/language"
 )
 
-// TODO : handle brick Element ID's (append or update) with search bricks ? for single or all locales ?
-
 // FetchSetComplete performs a complete fetch of set details including inventory and prices
 // This is used when there's no cached data or when cached data is stale
 func (h *Handler) FetchSetComplete(

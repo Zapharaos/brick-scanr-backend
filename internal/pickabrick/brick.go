@@ -60,23 +60,39 @@ type Brick struct {
 }
 
 // GetImageURL returns the image URL for this brick.
-// If ImageURL from the API is available, it returns that.
-// Otherwise, it constructs a CDN URL using the element ID.
+// Prioritizes constructing a CDN PNG URL using the element ID for consistency.
+// Falls back to the API-provided imageUrl if element ID is not available.
 // The CDN pattern is based on LEGO's Pick-a-Brick frontend code.
 // Uses the spin.photoreal format which provides PNG images without fixed size constraints.
 func (b *Brick) GetImageURL() string {
-	// Return API-provided image URL if available
-	if b.ImageURL != "" {
-		return b.ImageURL
-	}
-
-	// Fallback to CDN URL construction using element ID
+	// Prefer CDN URL construction using element ID for consistent PNG format
 	// Format: https://www.lego.com/cdn/product-assets/element.spin.photoreal/{elementID}/00001.png
 	if b.ID != "" {
 		return fmt.Sprintf("%s/%s/00001.png", CDNImageSpinPhotoreal, b.ID)
 	}
 
+	// Fallback to API-provided image URL if element ID is not available
+	if b.ImageURL != "" {
+		return b.ImageURL
+	}
+
 	return ""
+}
+
+// GetImageURLWithFallback returns the primary image URL and a fallback URL.
+// Primary: CDN PNG URL (constructed from element ID)
+// Fallback: API-provided imageUrl (may be JPG)
+// Use this when you want to handle potential 404s on the CDN.
+func (b *Brick) GetImageURLWithFallback() (primary string, fallback string) {
+	// Primary: CDN PNG URL
+	if b.ID != "" {
+		primary = fmt.Sprintf("%s/%s/00001.png", CDNImageSpinPhotoreal, b.ID)
+	}
+
+	// Fallback: API-provided URL
+	fallback = b.ImageURL
+
+	return primary, fallback
 }
 
 // FetchBricksByDesignID fetches all bricks matching the designID

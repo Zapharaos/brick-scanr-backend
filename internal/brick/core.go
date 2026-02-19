@@ -25,8 +25,6 @@ type Core struct {
 	ImageURL string `json:"image_url"`
 }
 
-// TODO : bricklinkURL ? bricklinkColor ? in Core or Locale ?
-
 // GetElementID returns the appropriate ElementID to use
 func (c *Core) GetElementID() (ElementID, error) {
 	// Determine the ID
