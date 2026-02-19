@@ -20,7 +20,8 @@ func MapLocaleFromPickabrick(brick Locale, pab pickabrick.Brick, tag language.Ta
 	}
 	brick.ID = &id
 	brick.Name = pab.Name
-	brick.ImageURL = pab.GetImageURL() // Use GetImageURL() which provides CDN fallback
+	// Use GetValidatedImageURL which automatically validates CDN PNG and falls back to API URL if needed
+	brick.ImageURL = pab.GetValidatedImageURL(pickabrick.C())
 
 	// Prepare fetched price
 	pbp := utils.MapPriceFromPickabrick(pab.Price)
