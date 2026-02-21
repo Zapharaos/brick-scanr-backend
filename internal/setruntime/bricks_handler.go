@@ -32,16 +32,15 @@ func newBricksHandler() BricksHandler {
 
 // get returns all Bricks currently stored in the runtime, sorted by index
 func (bh *BricksHandler) get() []set.Brick {
-	// Lock both mutexes for reading to safely access the final and missing slices
+	// Making a copy of the final slice to avoid potential issues with the response usages
+	// Encountered those issues with missing bricks appearing twice in the response
 	bh.fMutex.RLock()
-	bh.mMutex.RLock()
+	bricks := make([]set.Brick, len(bh.final))
+	copy(bricks, bh.final)
+	bh.fMutex.RUnlock()
 
 	// Combine final and missing bricks into a single slice
-	bricks := append(bh.final, bh.getMissingAsSlice()...)
-
-	// Unlock the mutexes after copying the bricks
-	bh.mMutex.RUnlock()
-	bh.fMutex.RUnlock()
+	bricks = append(bricks, bh.getMissingAsSlice()...)
 
 	// Sort Bricks by index to maintain original order from the set
 	set.SortBricksByIndex(bricks)
@@ -61,6 +60,15 @@ func (bh *BricksHandler) appendFinal(brick set.Brick) {
 	bh.fMutex.Lock()
 	defer bh.fMutex.Unlock()
 	bh.final = append(bh.final, brick)
+}
+
+// hasMissing checks if a Brick with the given ID exists in the missing map
+func (bh *BricksHandler) hasMissing(id uuid.UUID) bool {
+	bh.mMutex.Lock()
+	defer bh.mMutex.Unlock()
+
+	_, exists := bh.missing[id]
+	return exists
 }
 
 // appendMissing adds a Brick to the missing slice

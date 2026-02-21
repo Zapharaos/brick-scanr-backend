@@ -59,7 +59,7 @@ func (h *Handler) FetchSetComplete(
 	// Fetch bricks only if an inventory was found
 	if ok {
 		// Fetch prices from Pick-a-Brick (sequential - depends on inventory)
-		if err = h.fetchBricks(ctx, rs, lang, xlocale, false); err != nil {
+		if err = h.fetchBricks(ctx, rs, lang, xlocale); err != nil {
 			return // Error already handled
 		}
 	}
@@ -153,7 +153,7 @@ func (h *Handler) FetchFetchSetIncomplete(
 	}
 
 	// Fetch prices from Pick-a-Brick (sequential - depends on inventory)
-	if err := h.fetchBricks(ctx, rs, lang, xlocale, true); err != nil {
+	if err := h.fetchBricks(ctx, rs, lang, xlocale); err != nil {
 		return // Error already handled
 	}
 
@@ -348,18 +348,20 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 }
 
 // fetchBricks fetches prices for all Bricks in a set from Pick-a-Brick using a worker pool
-func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, lang language.Tag, xlocale language.Tag, skipFinalCaching bool) error {
+func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, lang language.Tag, xlocale language.Tag) error {
 	// Calculate total bricks
 	bricksSize := len(rs.bricks.missing)
 	if bricksSize == 0 {
 		return nil
 	}
+	totalSize := bricksSize + len(rs.bricks.final)
 
 	// Create optimal config based on brick count
-	config := workerpool.NewConfigOptimal(bricksSize, len(h.sets))
+	config := workerpool.NewConfigOptimal(totalSize, len(h.sets))
 
 	// Create shared progress tracker
-	bprogress := NewProgress(bricksSize, config.BatchSize)
+	bprogress := NewProgress(totalSize, config.BatchSize)
+	bprogress.Done = len(rs.bricks.final) // Start progress with already completed bricks
 
 	zap.L().Debug("Starting worker pool for price fetching",
 		zap.Int("bricks_size", bricksSize),
@@ -395,15 +397,7 @@ func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, lang language
 		return err
 	}
 
-	if !skipFinalCaching {
-		// TODO : investigate why this is a fix
-		// problem was that when sharing inventory fetching for same set but different locales,
-		// when reloading the page it has missing bricks somehow, with some having centamount 0
-
-		// Cache the processed items
-		rs.cacheSet(ctx, true)
-	}
-
+	rs.cacheSet(ctx, true)
 	zap.L().Debug("Worker pool completed price fetching",
 		zap.Int("bricks_size", bricksSize),
 	)
@@ -490,6 +484,8 @@ func (h *Handler) batchHandlerBricksProgress(
 		// If the brick has is custom or has a valid price, it means it's final
 		// We can update the runtime and set with its data
 		if b.IsCustom || b.HasValidPrice() {
+			wasMissing := rs.bricks.hasMissing(b.UUID)
+
 			// If applicable, remove the brick from the missing ones
 			rs.bricks.removeMissing(b.UUID)
 
@@ -501,6 +497,13 @@ func (h *Handler) batchHandlerBricksProgress(
 
 				// Add to set final data
 				rs.set.AddFinalBrickData(b)
+
+				if !wasMissing {
+					// When fetchInventory finds an already existing locale, it doesn't yet exist in the bricks handler
+					// The runtime set has missing parts incrementing, not decrementing yet as in fetchBricks
+					// But AddFinalBrickData increments the counter so we need to decrement it afterward
+					rs.set.IncrementMissingParts()
+				}
 			}
 
 			// Add brick to final bricks in runtime set
