@@ -33,10 +33,26 @@ run: # Run the executable
 # Build services
 docker-build:
 ifeq ($(TAG),v0.0.0)
-	$(DOCKER_COMPOSE) --progress plain build
+	$(DOCKER_COMPOSE) -f $(DOCKER_FILE) --progress plain build
 else
-	$(DOCKER_COMPOSE) --progress plain build --build-arg TAG=$(TAG)
+	$(DOCKER_COMPOSE) -f $(DOCKER_FILE) --progress plain build --build-arg TAG=$(TAG)
 endif
+
+# Docker commands
+docker-up:
+	$(DOCKER_COMPOSE) -f $(DOCKER_FILE) up -d
+
+docker-down:
+	$(DOCKER_COMPOSE) -f $(DOCKER_FILE) down
+
+docker-logs:
+	$(DOCKER_COMPOSE) -f $(DOCKER_FILE) logs -f
+
+docker-restart:
+	$(DOCKER_COMPOSE) -f $(DOCKER_FILE) restart
+
+docker-ps:
+	$(DOCKER_COMPOSE) -f $(DOCKER_FILE) ps
 
 # Swagger commands
 swagger: swagger-init swagger-ui swagger-gen
@@ -54,9 +70,22 @@ swagger-gen:
 # Help command to display usage
 help:
 	@echo "Usage:"
-	@echo "  make build        		  \- Build Go executable"
-	@echo "  make run        		  \- Run Go executable"
-	@echo "  make docker-build        \- Build all Docker services"
+	@echo "  make build               \- Build Go executable"
+	@echo "  make run                 \- Run Go executable"
+	@echo ""
+	@echo "Docker Commands:"
+	@echo "  make docker-build        \- Build Docker services"
+	@echo "  make docker-up           \- Start services"
+	@echo "  make docker-down         \- Stop services"
+	@echo "  make docker-logs         \- View logs"
+	@echo "  make docker-restart      \- Restart services"
+	@echo "  make docker-ps           \- List services"
+	@echo ""
+	@echo "Configuration:"
+	@echo "  Set COMPOSE_FILE in .env (docker-compose.dev.yml or docker-compose.prod.yml)"
+	@echo "  Or override: DOCKER_FILE=docker-compose.prod.yml make docker-up"
+	@echo ""
+	@echo "Swagger Commands:"
 	@echo "  make swagger             \- Generate and serve Swagger documentation"
 	@echo "  make swagger-init        \- Initialize Swagger documentation"
 	@echo "  make swagger-ui          \- Serve Swagger UI"

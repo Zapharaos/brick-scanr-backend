@@ -2,6 +2,7 @@ package app
 
 import (
 	"log"
+	"os"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -16,6 +17,7 @@ const (
 
 // initializeConfig initialize viper configuration
 func initializeConfig() {
+	// Load base config (default configuration)
 	viper.SetConfigName(configName)
 	viper.AddConfigPath(configPath)
 	viper.SetConfigType("yaml")
@@ -23,6 +25,28 @@ func initializeConfig() {
 	err := viper.ReadInConfig()
 	if err != nil {
 		log.Fatalf("Cannot read viper configuration: %s", err)
+	}
+
+	// Load production-specific config only if APP_ENV=prod
+	env := os.Getenv("APP_ENV")
+	if env == "prod" {
+		envConfigName := configName + ".prod"
+		viper.SetConfigName(envConfigName)
+		viper.AddConfigPath(configPath)
+		viper.SetConfigType("yaml")
+
+		// Merge production config (non-fatal if not found)
+		if err := viper.MergeInConfig(); err != nil {
+			if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+				log.Printf("Production config file %s.yaml not found, using base config only", envConfigName)
+			} else {
+				log.Printf("Error reading production config %s.yaml: %s", envConfigName, err)
+			}
+		} else {
+			log.Printf("Loaded production config: %s.yaml", envConfigName)
+		}
+	} else {
+		log.Printf("Using default config.yaml (APP_ENV=%s)", env)
 	}
 
 	// Initialize environment variables configuration

@@ -23,9 +23,9 @@ var (
 	BuildDate = ""
 )
 
-//	@version		1.0
-//	@title			BrickScanr API Swagger
-//	@description	BrickScanr API Swagger
+//	@version		v1
+//	@title			BrickScanr API
+//	@description	BrickScanr API for LEGO brick and set information
 //	@termsOfService	http://swagger.io/terms/
 
 //	@contact.name	Zapharaos

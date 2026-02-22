@@ -6,24 +6,26 @@ services:
     container_name: brick-scanr-backend
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${BACKEND_PORT:-3000}:3000"
     volumes:
       - ./logs:/root/logs
       - ./config:/root/config
     env_file:
       - .env
+    environment:
+      - APP_ENV=${APP_ENV:-}
     depends_on:
       redis:
         condition: service_healthy
     networks:
-      - brick-scanr-backend
+      - brick-scanr-network
 
   redis:
     image: redis:latest
     container_name: brick-scanr-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     env_file:
       - .env
     environment:
@@ -31,7 +33,7 @@ services:
     volumes:
       - redis-data:/data
     networks:
-      - brick-scanr-backend
+      - brick-scanr-network
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${BRICK_SCANR_REDIS_PASSWORD:-changeme123!}", "ping"]
       interval: 10s
@@ -42,5 +44,5 @@ volumes:
   redis-data:
 
 networks:
-  brick-scanr-backend:
+  brick-scanr-network:
     driver: bridge
