@@ -27,34 +27,34 @@ type CacheSet struct {
 	RuntimeSetID    uuid.UUID       // RuntimeSetID ID of the runtime set (if applicable)
 	InventoryAccess InventoryAccess // InventoryAccess contains the inventory access details if the inventory is being fetched
 	Set             set.External    // Set contains the cached set data (if available)
-	MissingLocale   bool            // MissingLocale indicates if the set is missing the requested xlocale
-	MissingPrice    bool            // MissingPrice indicates if the set price needs a price update for the requested xlocale
-	MissingBricks   []set.Brick     // MissingBricks contains Bricks that need price updates for the requested xlocale
-	FinalBricks     []set.Brick     // FinalBricks contains Bricks that have valid prices for the requested xlocale and can be used as is
+	MissingLocale   bool            // MissingLocale indicates if the set is missing the requested locale
+	MissingPrice    bool            // MissingPrice indicates if the set price needs a price update for the requested locale
+	MissingBricks   []set.Brick     // MissingBricks contains Bricks that need price updates for the requested locale
+	FinalBricks     []set.Brick     // FinalBricks contains Bricks that have valid prices for the requested locale and can be used as is
 }
 
 // GetCacheSet checks Redis cache for set data and determines what action is needed
-func (h *Handler) GetCacheSet(ctx context.Context, setID uuid.UUID, xlocale language.Tag) (*CacheSet, error) {
+func (h *Handler) GetCacheSet(ctx context.Context, setID uuid.UUID, locale language.Tag) (*CacheSet, error) {
 	// Search for the active runtime sets
 	rss := h.FindRuntimeSetBySetId(setID)
 
 	// No active runtime sets found, check redis cache to decide next steps
 	if len(rss) == 0 {
-		return checkSetInRedis(ctx, setID, xlocale)
+		return checkSetInRedis(ctx, setID, locale)
 	}
 
 	// There are active runtime sets for this set ID, process them to decide next steps
 	checkInventoryStatus := false
 	for _, rs := range rss {
 
-		// Check if the runtime set is fetching with the requested xlocale
-		if rs.Key().XLocale == xlocale {
+		// Check if the runtime set is fetching with the requested locale
+		if rs.Key().Locale == locale {
 			switch rs.Read().FetchStatus {
 			case set.FetchStatusPending, set.FetchStatusFetching:
 				// Runtime is fetching or pending, let the caller join it
 				zap.L().Info("Set details currently being fetched in runtime set",
 					zap.String("set_id", setID.String()),
-					zap.String("xlocale", xlocale.String()),
+					zap.String("locale", locale.String()),
 				)
 				return &CacheSet{
 					Status:       CacheStatusFetching,
@@ -67,7 +67,7 @@ func (h *Handler) GetCacheSet(ctx context.Context, setID uuid.UUID, xlocale lang
 				// Very low probability to reach this case here since the RS should be cleared right after completing
 				zap.L().Info("Set details already fetched and cached in runtime set",
 					zap.String("set_id", setID.String()),
-					zap.String("xlocale", xlocale.String()),
+					zap.String("locale", locale.String()),
 				)
 				return &CacheSet{
 					Status:       CacheStatusComplete,
@@ -90,13 +90,13 @@ func (h *Handler) GetCacheSet(ctx context.Context, setID uuid.UUID, xlocale lang
 	}
 
 	if checkInventoryStatus {
-		// There is an active runtime set fetching the full set details but not with the requested xlocale
+		// There is an active runtime set fetching the full set details but not with the requested locale
 
-		// Option 1 - Start a new RS to fetch all with the requested xlocale
-		// check for valid cached data, if existing then care for missing prices / missing currencies / outdated xlocale prices
+		// Option 1 - Start a new RS to fetch all with the requested locale
+		// check for valid cached data, if existing then care for missing prices / missing currencies / outdated locale prices
 
 		// Option 2 - Wait for ongoing RS to finish inventory
-		// then filter missing/outdated prices with xlocale, then fetch them
+		// then filter missing/outdated prices with locale, then fetch them
 
 		// Try to access the inventory to join as a listener or become the writer
 		ihAccess := IH().Access(setID)
@@ -135,15 +135,15 @@ func (h *Handler) GetCacheSet(ctx context.Context, setID uuid.UUID, xlocale lang
 		// Fall through to check Redis cache
 	}
 
-	// There are active runtime sets, but none match the requested xlocale
+	// There are active runtime sets, but none match the requested locale
 	// Check the set data validity to decide upon the next step
-	return checkSetInRedis(ctx, setID, xlocale)
+	return checkSetInRedis(ctx, setID, locale)
 }
 
 // checkSetInRedis checks Redis cache for the set data and analyzes it to determine what action is needed
-func checkSetInRedis(ctx context.Context, setID uuid.UUID, xlocale language.Tag) (*CacheSet, error) {
+func checkSetInRedis(ctx context.Context, setID uuid.UUID, locale language.Tag) (*CacheSet, error) {
 	// Try to get cached set
-	sCache, _, err := set.RedisGetLocale(ctx, setID, xlocale, true)
+	sCache, _, err := set.RedisGetLocale(ctx, setID, locale, true)
 	if err != nil {
 		return &CacheSet{Status: CacheStatusMissing}, nil
 	}
@@ -156,14 +156,14 @@ func checkSetInRedis(ctx context.Context, setID uuid.UUID, xlocale language.Tag)
 	}
 
 	// Minimal data is present, we can consider the cached data as reliable and check its validity
-	return checkSetDataValidity(ctx, sCache, setID, xlocale)
+	return checkSetDataValidity(ctx, sCache, setID, locale)
 }
 
 // checkSetDataValidity validates completed existing data and checks for missing elements
-func checkSetDataValidity(ctx context.Context, s set.Locale, setID uuid.UUID, xlocale language.Tag) (*CacheSet, error) {
+func checkSetDataValidity(ctx context.Context, s set.Locale, setID uuid.UUID, locale language.Tag) (*CacheSet, error) {
 	zap.L().Info("Set details found in cache, checking Bricks and prices",
 		zap.String("set_id", setID.String()),
-		zap.String("xlocale", xlocale.String()),
+		zap.String("locale", locale.String()),
 	)
 
 	// Set up the cache response
@@ -199,7 +199,7 @@ func checkSetDataValidity(ctx context.Context, s set.Locale, setID uuid.UUID, xl
 		}
 
 		// Check the cache for this brick and get the most up-to-date data available
-		b, final := CheckBrickCache(ctx, bSet, xlocale, false)
+		b, final := CheckBrickCache(ctx, bSet, locale, false)
 		if final {
 			bricksFinal = append(bricksFinal, b)
 			sExternal.AddFinalBrickData(b)
@@ -213,9 +213,9 @@ func checkSetDataValidity(ctx context.Context, s set.Locale, setID uuid.UUID, xl
 
 	// If all elements are present and up-to-date, return complete
 	if !setMissingLocale && !setMissingPrice && len(bricksMissing) == 0 {
-		zap.L().Info("All Bricks have prices for requested xlocale",
+		zap.L().Info("All Bricks have prices for requested locale",
 			zap.String("set_id", setID.String()),
-			zap.String("xlocale", xlocale.String()),
+			zap.String("locale", locale.String()),
 		)
 
 		// Force final bricks in here since already sorted by index
@@ -233,7 +233,7 @@ func checkSetDataValidity(ctx context.Context, s set.Locale, setID uuid.UUID, xl
 
 	zap.L().Info("Set cached data is incomplete",
 		zap.String("set_id", setID.String()),
-		zap.String("xlocale", xlocale.String()),
+		zap.String("locale", locale.String()),
 		zap.Bool("missing_locale", setMissingLocale),
 		zap.Bool("missing_price", setMissingPrice),
 		zap.Int("missing_bricks", len(bricksMissing)),
@@ -307,7 +307,7 @@ func (rs *RuntimeSet) cacheSet(ctx context.Context, updateSetFromBricksHandler b
 	if err != nil {
 		zap.L().Error("Failed to cache set locale in Redis",
 			zap.String("set_id", rs.Key().SetID.String()),
-			zap.String("xlocale", rs.Key().XLocale.String()),
+			zap.String("locale", rs.Key().Locale.String()),
 			zap.Error(err),
 		)
 	}

@@ -45,7 +45,7 @@ func FetchBrickDetailsByElement(w http.ResponseWriter, r *http.Request) {
 	elementID := brick.ElementID(id)
 
 	// Search for the brick locale in cache
-	if bLocale, err := brick.RedisGetLocale(r.Context(), elementID, GetXLocaleFromContext(r)); err == nil {
+	if bLocale, err := brick.RedisGetLocale(r.Context(), elementID, GetLanguageFromContext(r)); err == nil {
 
 		// Fetch the design details for the brick design ID
 		designIndex, ok := fetchDesignIndexByDesignID(w, r, bLocale.ID.DesignID)
@@ -106,12 +106,11 @@ func FetchBrickDetailsByDesign(w http.ResponseWriter, r *http.Request) {
 
 // fetchDesignIndexByDesignID is a helper function to fetch the design details for a given design ID
 func fetchDesignIndexByDesignID(w http.ResponseWriter, r *http.Request, designID brick.DesignID) (brick.DesignIndex, bool) {
-	// Extract data
-	lang := GetLanguageFromContext(r)
-	xlocale := GetXLocaleFromContext(r)
+	// Extract locale from context
+	locale := GetLanguageFromContext(r)
 
 	// Fetch the design details
-	mainDesign, err := fetchDesign(r.Context(), designID, lang, xlocale)
+	mainDesign, err := fetchDesign(r.Context(), designID, locale)
 	if err != nil {
 		render.Error(w, r, err, "Failed to fetch design details")
 		return nil, false
@@ -145,7 +144,7 @@ func fetchDesignIndexByDesignID(w http.ResponseWriter, r *http.Request, designID
 		var alternateDesign brick.DesignWithBricks
 
 		// Fetch the design details
-		alternateDesign, err = fetchDesignWithDefault(r.Context(), alternateDesignID, lang, xlocale, defaultDesign)
+		alternateDesign, err = fetchDesignWithDefault(r.Context(), alternateDesignID, locale, defaultDesign)
 		if err != nil {
 			render.Error(w, r, err, "Failed to fetch design details")
 			return nil, false
@@ -166,22 +165,20 @@ func fetchDesignIndexByDesignID(w http.ResponseWriter, r *http.Request, designID
 func fetchDesign(
 	ctx context.Context,
 	designID brick.DesignID,
-	lang language.Tag,
-	xlocale language.Tag,
+	locale language.Tag,
 ) (brick.DesignWithBricks, error) {
-	return fetchDesignWithDefault(ctx, designID, lang, xlocale, brick.Design{})
+	return fetchDesignWithDefault(ctx, designID, locale, brick.Design{})
 }
 
 // fetchDesignWithDefaultCore is a helper function to fetch the design details by design ID, it will check the cache first and if not found, it will fetch the data from BrickLink and pick-a-brick API, then cache the data for future lookups. It will also handle the different design status (minimal or complete) to optimize the fetching process.
 func fetchDesignWithDefault(
 	ctx context.Context,
 	designID brick.DesignID,
-	lang language.Tag,
-	xlocale language.Tag,
+	locale language.Tag,
 	defaultDesign brick.Design,
 ) (brick.DesignWithBricks, error) {
 	// Check cache by design ID
-	design, err := brick.RedisGetDesign(ctx, designID, xlocale)
+	design, err := brick.RedisGetDesign(ctx, designID, locale)
 	if err != nil && !errors.Is(err, redis.ErrKeyNotFound) {
 		// An error has occurred, it's not a cache miss (not found) => log and skip caching for this item
 		zap.L().Error("Failed to check design in Redis cache",
@@ -234,7 +231,7 @@ func fetchDesignWithDefault(
 	case brick.DesignStatusMinimal:
 		// Design data is minimal (bricks for element IDs are not provided) - retrieve the bricks
 
-		bricks, err = design.FetchBricks(ctx, lang, xlocale)
+		bricks, err = design.FetchBricks(ctx, locale)
 		if err != nil {
 			zap.L().Error("Failed to fetch complete design details",
 				zap.Error(err),
@@ -265,7 +262,7 @@ func fetchDesignWithDefault(
 	default:
 		// Not found in cache - retrieve all design ID data
 
-		bricks, err = design.Fetch(ctx, lang, xlocale)
+		bricks, err = design.Fetch(ctx, locale)
 		if err != nil {
 			zap.L().Error("Failed to fetch design details from BrickLink",
 				zap.Error(err),

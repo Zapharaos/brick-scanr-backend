@@ -13,7 +13,6 @@ type Header string
 
 const (
 	HeaderAcceptLanguage Header = "Accept-Language"
-	HeaderXLocale        Header = "X-Locale"
 )
 
 // LocaleMiddleware extracts the locale from the Accept-Language header
@@ -28,14 +27,6 @@ func LocaleMiddleware(next http.Handler) http.Handler {
 			tag = utils.GetLocale()
 		}
 		ctx := context.WithValue(r.Context(), app.ContextKeyLanguage, tag)
-
-		// Retrieve x-locale header
-		tag, ok, err = parseLanguageTagFromHeader(r, HeaderXLocale)
-		if !ok || err != nil {
-			// Default to config if no valid locale is found
-			tag = utils.GetLocale()
-		}
-		ctx = context.WithValue(ctx, app.ContextKeyXLocale, tag)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

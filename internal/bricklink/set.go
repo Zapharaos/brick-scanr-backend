@@ -14,7 +14,7 @@ import (
 )
 
 // FetchSetDetails fetches detailed information for a set by its item ID
-func (c *Client) FetchSetDetails(itemID int, lang language.Tag) (*Set, error) {
+func (c *Client) FetchSetDetails(itemID int, locale language.Tag) (*Set, error) {
 	itemIDStr := strconv.Itoa(itemID)
 
 	baseURL := "https://www.bricklink.com/ajax/renovate/catalog/getItemImageList.ajax"
@@ -34,7 +34,7 @@ func (c *Client) FetchSetDetails(itemID int, lang language.Tag) (*Set, error) {
 	}
 
 	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Language", lang.String()+",en;q=0.9")
+	req.Header.Set("Accept-Language", locale.String()+",en;q=0.9")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36")
 	req.Header.Set("Referer", "https://www.bricklink.com/")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")

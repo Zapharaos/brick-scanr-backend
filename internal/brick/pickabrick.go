@@ -42,8 +42,8 @@ func MapLocaleFromPickabrick(brick Locale, pab pickabrick.Brick, tag language.Ta
 // - A boolean indicating whether the fetch operation was successful
 // - A boolean indicating whether a valid locale with price data was found
 // - A pointer to a Locale struct containing a potential locale if not found on pick-a-brick, or nil if not applicable
-func (l *Locale) Fetch(ctx context.Context, elementID ElementID, lang, xlocale language.Tag) (bool, bool, *Locale) {
-	results, err := pickabrick.C().FetchBricksByBrickID(string(elementID), lang, xlocale)
+func (l *Locale) Fetch(ctx context.Context, elementID ElementID, locale language.Tag) (bool, bool, *Locale) {
+	results, err := pickabrick.C().FetchBricksByBrickID(string(elementID), locale)
 	if err != nil {
 		// Check if it's a not-found error
 		if !errors.Is(err, pickabrick.ErrBrickNotFound) {
@@ -51,7 +51,7 @@ func (l *Locale) Fetch(ctx context.Context, elementID ElementID, lang, xlocale l
 			zap.L().Warn("Failed to fetch brick by elementID",
 				zap.Error(err),
 				zap.String("elementID", string(elementID)),
-				zap.String("xlocale", xlocale.String()))
+				zap.String("locale", locale.String()))
 
 			// Return as unsuccessful fetch, with empty data
 			return false, false, nil
@@ -59,14 +59,14 @@ func (l *Locale) Fetch(ctx context.Context, elementID ElementID, lang, xlocale l
 
 		zap.L().Debug("ElementID not found in pick-a-brick API",
 			zap.String("elementID", string(elementID)),
-			zap.String("xlocale", xlocale.String()),
+			zap.String("locale", locale.String()),
 		)
 
 		// Create a completely independent brick for caching not-found status
 		// We must not modify the original brick that will be used in the set
 		bLocaleNotFound := l.Copy()
 		bLocaleNotFound.Price = utils.Price{
-			CurrencyCode: xlocale.String(),
+			CurrencyCode: locale.String(),
 			FetchedAt:    time.Now().UnixMilli(),
 			NotFound:     true,
 			ItemID:       string(elementID),
@@ -74,11 +74,11 @@ func (l *Locale) Fetch(ctx context.Context, elementID ElementID, lang, xlocale l
 		bLocaleNotFound.ID.ElementID = elementID
 
 		// Cache this brick ID as not-found (independent entry, won't affect the set's brick)
-		if cacheErr := RedisSetLocale(ctx, bLocaleNotFound, xlocale, true); cacheErr != nil {
+		if cacheErr := RedisSetLocale(ctx, bLocaleNotFound, locale, true); cacheErr != nil {
 			zap.L().Warn("Failed to cache brick ID with not-found price",
 				zap.Error(cacheErr),
 				zap.String("elementID", string(elementID)),
-				zap.String("xlocale", xlocale.String()),
+				zap.String("locale", locale.String()),
 			)
 		}
 
@@ -95,7 +95,7 @@ func (l *Locale) Fetch(ctx context.Context, elementID ElementID, lang, xlocale l
 		if ElementID(pab.ID) == elementID {
 
 			// Map result to local representation
-			mappedB := MapLocaleFromPickabrick(*l, pab, xlocale)
+			mappedB := MapLocaleFromPickabrick(*l, pab, locale)
 
 			// Check if current price currency is already set, valid and lower
 			if l.HasLowerPrice(mappedB) {
@@ -110,11 +110,11 @@ func (l *Locale) Fetch(ctx context.Context, elementID ElementID, lang, xlocale l
 			l.Color = mappedB.Color
 
 			// Cache the updated brick with new price data
-			if cacheErr := RedisSetLocale(ctx, *l, xlocale, true); cacheErr != nil {
+			if cacheErr := RedisSetLocale(ctx, *l, locale, true); cacheErr != nil {
 				zap.L().Warn("Failed to cache brick with new price",
 					zap.Error(cacheErr),
 					zap.String("element_id", string(elementID)),
-					zap.String("xlocale", xlocale.String()),
+					zap.String("locale", locale.String()),
 				)
 				// Not fatal, continue without caching
 			}

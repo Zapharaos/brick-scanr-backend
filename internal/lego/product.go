@@ -12,7 +12,7 @@ import (
 )
 
 // FetchProductDetails fetches product details from LEGO's official API using the product slug
-func (c *Client) FetchProductDetails(slug string, lang, xlocale language.Tag) (*Product, error) {
+func (c *Client) FetchProductDetails(slug string, locale language.Tag) (*Product, error) {
 
 	// Build the GraphQL request URL
 	baseURL := "https://www.lego.com/api/graphql/ProductDetails"
@@ -28,7 +28,7 @@ func (c *Client) FetchProductDetails(slug string, lang, xlocale language.Tag) (*
 
 	// Prepare extensions with locale and persisted query
 	extensions := map[string]interface{}{
-		"locale": xlocale.String(),
+		"locale": locale.String(),
 		"persistedQuery": map[string]interface{}{
 			"version":    1,
 			"sha256Hash": "27f8e800bed4b4e47c81ab976436c641b50e3683a41412d9496e90ae79dd19da",
@@ -54,18 +54,18 @@ func (c *Client) FetchProductDetails(slug string, lang, xlocale language.Tag) (*
 
 	// Set required headers
 	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Language", lang.String()+",en;q=0.9")
+	req.Header.Set("Accept-Language", locale.String()+",en;q=0.9")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-locale", xlocale.String())
+	req.Header.Set("x-locale", locale.String())
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36")
-	req.Header.Set("Referer", fmt.Sprintf("https://www.lego.com/%s/product/%s", xlocale.String(), slug))
+	req.Header.Set("Referer", fmt.Sprintf("https://www.lego.com/%s/product/%s", locale.String(), slug))
 	req.Header.Set("sec-fetch-dest", "empty")
 	req.Header.Set("sec-fetch-mode", "same-origin")
 	req.Header.Set("sec-fetch-site", "same-origin")
 
 	zap.L().Info("Fetching LEGO product details",
 		zap.String("slug", slug),
-		zap.String("xlocale", xlocale.String()))
+		zap.String("locale", locale.String()))
 
 	// Execute the request with rate limiting and retry
 	resp, err := c.throttler.DoWithRetry(req.Context(), c.httpClient, req)
@@ -102,7 +102,7 @@ func (c *Client) FetchProductDetails(slug string, lang, xlocale language.Tag) (*
 	if response.Data.Product.ProductCode == "" && response.Data.Product.ID == "" {
 		zap.L().Warn("LEGO API returned empty product data",
 			zap.String("slug", slug),
-			zap.String("xlocale", xlocale.String()))
+			zap.String("locale", locale.String()))
 		return nil, ErrProductNotFound
 	}
 

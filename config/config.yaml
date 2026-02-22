@@ -146,7 +146,6 @@ cors:
     - "Authorization"
     - "Content-Type"
     - "X-CSRF-Token"
-    - "X-Locale"
 
   # Allow credentials
   # Default value: false

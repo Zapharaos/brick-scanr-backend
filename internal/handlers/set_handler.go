@@ -47,19 +47,17 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 		setId = id // resolved UUID from slug
 	}
 
-	// Extract language + xlocale from context
-	lang := GetLanguageFromContext(r)
-	xlocale := GetXLocaleFromContext(r)
+	// Extract locale from context
+	locale := GetLanguageFromContext(r)
 
 	zap.L().Info("FetchSetDetails endpoint called",
 		zap.String("id", setId.String()),
-		zap.String("language", lang.String()),
-		zap.String("xlocale", xlocale.String()),
+		zap.String("locale", locale.String()),
 		zap.String("remote_addr", r.RemoteAddr),
 	)
 
 	// Look for any form of cached data, either through runtime or cache
-	cacheSet, err := h.srh.GetCacheSet(r.Context(), setId, xlocale)
+	cacheSet, err := h.srh.GetCacheSet(r.Context(), setId, locale)
 	if err != nil || cacheSet == nil {
 		render.Error(w, r, err, "Failed to check cached set data")
 		return
@@ -85,12 +83,12 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 
 	case setruntime.CacheStatusIncomplete:
 		// Data is cached but incomplete : missing prices, bricks, currency, etc.
-		h.handleSetFetchIncomplete(w, r, setId, cacheSet, lang, xlocale)
+		h.handleSetFetchIncomplete(w, r, setId, cacheSet, locale)
 		return
 
 	case setruntime.CacheStatusFailed, setruntime.CacheStatusNeedsRefetch, setruntime.CacheStatusMissing:
 		// Need to start a new complete fetch
-		h.handleFetchSetComplete(w, r, setId, cacheSet.InventoryAccess, lang, xlocale)
+		h.handleFetchSetComplete(w, r, setId, cacheSet.InventoryAccess, locale)
 		return
 
 	default:
@@ -100,9 +98,9 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSetFetchIncomplete handles the case where we need to fetch missing elements
-func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request, setId uuid.UUID, cache *setruntime.CacheSet, lang, xlocale language.Tag) {
+func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request, setId uuid.UUID, cache *setruntime.CacheSet, locale language.Tag) {
 	// Create the key for this operation
-	key := setruntime.NewRuntimeSetKey(setId, xlocale, setruntime.OpTypeIncomplete)
+	key := setruntime.NewRuntimeSetKey(setId, locale, setruntime.OpTypeIncomplete)
 
 	// Check if there's already a runtime for this exact operation
 	if rs, ok := h.srh.FindRuntimeSetByKey(key); ok {
@@ -128,12 +126,12 @@ func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request
 	ihValid := cache.InventoryAccess.IsValid()
 	if ihValid {
 		// We need to listen to the inventory changes before proceeding normally
-		rs = h.srh.RunSet(cache.Set, xlocale, setruntime.OpTypeIncomplete, cache.InventoryAccess)
+		rs = h.srh.RunSet(cache.Set, locale, setruntime.OpTypeIncomplete, cache.InventoryAccess)
 	} else {
 		// There isn't an inventory access, we can skip the inventory stuff and proceed normally
 
 		// Create websocket runtime for fetching
-		rs = h.srh.RunSet(cache.Set, xlocale, setruntime.OpTypeIncomplete, setruntime.InventoryAccess{})
+		rs = h.srh.RunSet(cache.Set, locale, setruntime.OpTypeIncomplete, setruntime.InventoryAccess{})
 
 		// Put cache analyze results into the runtime
 		rs.NewBricksHandler(cache.FinalBricks, cache.MissingBricks)
@@ -146,8 +144,7 @@ func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request
 		setId,
 		missingLocale,
 		missingSetPrice,
-		lang,
-		xlocale,
+		locale,
 	)
 
 	// Return websocket ID for client to connect
@@ -159,10 +156,10 @@ func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request
 }
 
 // handleFetchSetComplete handles the case where we need to perform a complete fetch
-func (h Handler) handleFetchSetComplete(w http.ResponseWriter, r *http.Request, setId uuid.UUID, ihAccess setruntime.InventoryAccess, lang, xlocale language.Tag) {
+func (h Handler) handleFetchSetComplete(w http.ResponseWriter, r *http.Request, setId uuid.UUID, ihAccess setruntime.InventoryAccess, locale language.Tag) {
 	// Retrieve BrickLink set info from cache
 	// If there was any set locale data, we would have handled it in the incomplete flow, not here
-	cacheLocaleWithCore, _, err := set.RedisGetLocale(r.Context(), setId, xlocale, true)
+	cacheLocaleWithCore, _, err := set.RedisGetLocale(r.Context(), setId, locale, true)
 	if err != nil {
 		// TTL most likely expired - cannot proceed
 		render.NotFound(w, r, err)
@@ -187,15 +184,14 @@ func (h Handler) handleFetchSetComplete(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Create websocket
-	rs := h.srh.RunSet(se, xlocale, setruntime.OpTypeFull, ihAccess)
+	rs := h.srh.RunSet(se, locale, setruntime.OpTypeFull, ihAccess)
 
 	// Start processing in background
 	go h.srh.FetchSetComplete(
 		context.Background(),
 		rs,
 		setId,
-		lang,
-		xlocale,
+		locale,
 	)
 
 	// Return websocket ID for client to connect
@@ -284,11 +280,11 @@ func ExportSet(w http.ResponseWriter, r *http.Request) {
 		setId = id // resolved UUID from slug
 	}
 
-	// Extract xlocale from context
-	xlocale := GetXLocaleFromContext(r)
+	// Extract locale from context
+	locale := GetLanguageFromContext(r)
 
 	// Retrieve set locale from cache
-	sLocale, ok, err := set.RedisGetLocale(r.Context(), setId, xlocale, true)
+	sLocale, ok, err := set.RedisGetLocale(r.Context(), setId, locale, true)
 	if err != nil || !ok {
 		render.NotFound(w, r, err)
 		return
@@ -301,12 +297,12 @@ func ExportSet(w http.ResponseWriter, r *http.Request) {
 
 	// For each brick in the set, retrieve full data from cache, even if outdated
 	for i, bSet := range sLocale.Bricks {
-		b, _ := setruntime.CheckBrickCache(r.Context(), bSet, xlocale, true)
+		b, _ := setruntime.CheckBrickCache(r.Context(), bSet, locale, true)
 		sLocale.Bricks[i] = b
 	}
 
-	// Get xlocale translations localizer
-	localizer, _, err := lingo.GetLocalizer(xlocale)
+	// Get locale translations localizer
+	localizer, _, err := lingo.GetLocalizer(locale)
 	if err != nil {
 		zap.L().Error("Failed to get localizer", zap.Error(err))
 		render.Error(w, r, err, "Get localizer")
@@ -315,7 +311,7 @@ func ExportSet(w http.ResponseWriter, r *http.Request) {
 
 	// Generate export table
 	startTime := time.Now()
-	table := set.ExportBuildTable(sLocale, localizer, xlocale)
+	table := set.ExportBuildTable(sLocale, localizer, locale)
 
 	zap.L().Info("Set export table generated",
 		zap.String("setID", sLocale.ID.String()),

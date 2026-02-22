@@ -58,12 +58,11 @@ func Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract language + xlocale from context
-	lang := GetLanguageFromContext(r)
-	xlocale := GetXLocaleFromContext(r)
+	// Extract locale from context
+	locale := GetLanguageFromContext(r)
 
 	// Execute search on BrickLink
-	bricklinkSets, bricklinkBricks, err := bricklink.C().Search(query, lang)
+	bricklinkSets, bricklinkBricks, err := bricklink.C().Search(query, locale)
 	if err != nil {
 		zap.L().Error("Failed to search responseItems",
 			zap.Error(err),
@@ -79,17 +78,17 @@ func Search(w http.ResponseWriter, r *http.Request) {
 	for _, s := range bricklinkSets {
 
 		// Check cache and if found then return the cached data, otherwise map the search result to internal struct and cache it
-		item, ok, created := handleSearchBricklinkSet(r.Context(), s, xlocale)
+		item, ok, created := handleSearchBricklinkSet(r.Context(), s, locale)
 		if !ok {
 			// Error already logged, skip this item
 			continue
 		}
 
-		// If the set was newly created or misses price for xlocale, fetch full details
+		// If the set was newly created or misses price for locale, fetch full details
 		if created || !item.HasValidPrice() {
 
 			// Fetch details from LEGO and BrickLink to get details data
-			_, err = set.FetchDetails(r.Context(), item.ID, &item, lang, xlocale)
+			_, err = set.FetchDetails(r.Context(), item.ID, &item, locale)
 			if err != nil {
 				// Error already logged, skip this item
 				continue
@@ -120,7 +119,7 @@ func Search(w http.ResponseWriter, r *http.Request) {
 	for _, b := range bricklinkBricks {
 
 		// Check cache and if found then return the cached data, otherwise map the search result to internal struct and cache it
-		itemType, item, ok := handleSearchBricklinkBrick(r.Context(), b, lang, xlocale)
+		itemType, item, ok := handleSearchBricklinkBrick(r.Context(), b, locale)
 		if !ok {
 			// Error already logged, skip this item
 			continue
@@ -141,7 +140,7 @@ func Search(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSearchBricklinkSet processes a single BrickLink search item and returns the internal Set representation
-func handleSearchBricklinkSet(ctx context.Context, bsi bricklink.SearchItem, xlocale language.Tag) (set.Locale, bool, bool) {
+func handleSearchBricklinkSet(ctx context.Context, bsi bricklink.SearchItem, locale language.Tag) (set.Locale, bool, bool) {
 	// Map to internal representation
 	core, err := set.NewCoreFromBricklinkSearchItem(bsi)
 	if err != nil {
@@ -154,7 +153,7 @@ func handleSearchBricklinkSet(ctx context.Context, bsi bricklink.SearchItem, xlo
 
 	// Try to find the set in Redis cache by BrickLink ID
 	bricklinkID := strconv.Itoa(core.BricklinkID)
-	sCache, ttl, err := set.RedisGetLocaleByBricklinkID(ctx, bricklinkID, xlocale)
+	sCache, ttl, err := set.RedisGetLocaleByBricklinkID(ctx, bricklinkID, locale)
 
 	// An error has occurred, it's not a cache miss (not found) => log and skip caching for this item
 	if err != nil && !errors.Is(err, redis.ErrKeyNotFound) {
@@ -223,7 +222,7 @@ func handleSearchBricklinkSet(ctx context.Context, bsi bricklink.SearchItem, xlo
 }
 
 // handleSearchBricklinkBrick processes a single BrickLink search item and returns the internal Brick representation
-func handleSearchBricklinkBrick(ctx context.Context, bsi bricklink.SearchItem, lang language.Tag, xlocale language.Tag) (SearchResponseType, interface{}, bool) {
+func handleSearchBricklinkBrick(ctx context.Context, bsi bricklink.SearchItem, locale language.Tag) (SearchResponseType, interface{}, bool) {
 
 	// Get the element ID and design ID from the BrickLink search item
 	elementID, designID := brick.GetIDsFromBricklinkSearchItem(bsi)
@@ -244,7 +243,7 @@ func handleSearchBricklinkBrick(ctx context.Context, bsi bricklink.SearchItem, l
 	}
 
 	// First try to find the design by design ID
-	designMinimal, ok := getBrickDesign(ctx, designID, lang, xlocale)
+	designMinimal, ok := getBrickDesign(ctx, designID, locale)
 
 	// This can occur if the search input is not an element ID but a design ID
 	// Check must be run before checkin ok boolean, we need to be sure of the search response type
@@ -259,14 +258,14 @@ func handleSearchBricklinkBrick(ctx context.Context, bsi bricklink.SearchItem, l
 
 	// We have a design, we can try to find the brick locale by element ID
 	designMinimal.ID.ElementID = elementID
-	bLocale, ok := getBrickLocale(ctx, designMinimal.Core, lang, xlocale)
+	bLocale, ok := getBrickLocale(ctx, designMinimal.Core, locale)
 	return SearchResponseTypeBrickElement, bLocale, ok
 }
 
 // getBrickDesign fetches brick details from BrickLink using the design ID, maps it to internal representation, caches it, and returns the brick locale
-func getBrickDesign(ctx context.Context, designID brick.DesignID, lang language.Tag, xlocale language.Tag) (brick.Design, bool) {
+func getBrickDesign(ctx context.Context, designID brick.DesignID, locale language.Tag) (brick.Design, bool) {
 	// Check cache by design ID
-	design, err := brick.RedisGetDesign(ctx, designID, xlocale)
+	design, err := brick.RedisGetDesign(ctx, designID, locale)
 	if err != nil && !errors.Is(err, redis.ErrKeyNotFound) {
 		// An error has occurred, it's not a cache miss (not found) => log and skip caching for this item
 		zap.L().Error("Failed to check design in Redis cache",
@@ -289,7 +288,7 @@ func getBrickDesign(ctx context.Context, designID brick.DesignID, lang language.
 	design.ID = &id
 
 	// Not found in cache, fetch it and cache it
-	err = design.FetchMinimal(ctx, lang, xlocale)
+	err = design.FetchMinimal(ctx, locale)
 	if err != nil {
 		return brick.Design{}, false
 	}
@@ -298,14 +297,14 @@ func getBrickDesign(ctx context.Context, designID brick.DesignID, lang language.
 }
 
 // getBrickLocale fetches brick details from BrickLink using the element ID, maps it to internal representation, caches it, and returns the brick locale
-func getBrickLocale(ctx context.Context, designCore brick.Core, lang language.Tag, xlocale language.Tag) (brick.Locale, bool) {
+func getBrickLocale(ctx context.Context, designCore brick.Core, locale language.Tag) (brick.Locale, bool) {
 	// Build a minimal brick locale version
 	bLocale := brick.Locale{}
 	bLocale.Core = designCore
 
 	// Search for the brick locale in cache
 	var valid, notfound bool
-	bLocale, valid, notfound = bLocale.LoadFromRedis(ctx, bLocale.ID.ElementID, xlocale, false, false)
+	bLocale, valid, notfound = bLocale.LoadFromRedis(ctx, bLocale.ID.ElementID, locale, false, false)
 
 	// Brick locale already cached, return it
 	if valid || notfound {
@@ -314,13 +313,13 @@ func getBrickLocale(ctx context.Context, designCore brick.Core, lang language.Ta
 
 	// Not found in cache
 
-	ok, _, _ := bLocale.Fetch(ctx, bLocale.ID.ElementID, lang, xlocale)
+	ok, _, _ := bLocale.Fetch(ctx, bLocale.ID.ElementID, locale)
 	if !ok {
 		return brick.Locale{}, false
 	}
 
 	// Cache the brick details in Redis for future searches and lookups
-	err := brick.RedisSetLocale(ctx, bLocale, xlocale, true)
+	err := brick.RedisSetLocale(ctx, bLocale, locale, true)
 	if err != nil {
 		zap.L().Error("Failed to cache brick in Redis",
 			zap.Error(err),
@@ -335,10 +334,9 @@ func getBrickLocale(ctx context.Context, designCore brick.Core, lang language.Ta
 // searchBrickByDesignID is a helper function that performs a search on BrickLink using the design ID, and if it finds a matching design, it updates the input design with the details from the search result and returns it. This is used to handle cases where the search input is a design ID but we need to fetch the details using the design ID instead of element ID.
 func searchBrickByDesignID(w http.ResponseWriter, r *http.Request, designID brick.DesignID, inputDesign brick.DesignWithBricks) (brick.DesignWithBricks, bool) {
 	// Extract data
-	lang := GetLanguageFromContext(r)
-	xlocale := GetXLocaleFromContext(r)
+	locale := GetLanguageFromContext(r)
 
-	_, bricklinkBricks, err := bricklink.C().Search(string(designID), lang)
+	_, bricklinkBricks, err := bricklink.C().Search(string(designID), locale)
 	if err != nil {
 		zap.L().Error("Failed to search responseItems",
 			zap.Error(err),
@@ -358,14 +356,14 @@ func searchBrickByDesignID(w http.ResponseWriter, r *http.Request, designID bric
 	resDesignID := brick.GetDesignIDFromBricklinkSearchItem(bricklinkBricks[0])
 
 	// Fetch the design details for the main design ID
-	design, ok := getBrickDesign(r.Context(), resDesignID, lang, xlocale)
+	design, ok := getBrickDesign(r.Context(), resDesignID, locale)
 	if !ok || design.DesignStatus < brick.DesignStatusMinimal {
 		render.NotFound(w, r, fmt.Errorf("design not found on BrickLink"))
 		return brick.DesignWithBricks{}, false
 	}
 
 	// Cache the main design
-	err = brick.RedisSetDesign(r.Context(), design, xlocale, true)
+	err = brick.RedisSetDesign(r.Context(), design, locale, true)
 	if err != nil {
 		zap.L().Error("Failed to cache design in Redis",
 			zap.Error(err),
@@ -385,7 +383,7 @@ func searchBrickByDesignID(w http.ResponseWriter, r *http.Request, designID bric
 	inputDesign.ID.DesignID = designID
 
 	// Cache the requested design
-	err = brick.RedisSetDesign(r.Context(), design, xlocale, true)
+	err = brick.RedisSetDesign(r.Context(), design, locale, true)
 	if err != nil {
 		zap.L().Error("Failed to cache design in Redis",
 			zap.Error(err),
@@ -399,11 +397,10 @@ func searchBrickByDesignID(w http.ResponseWriter, r *http.Request, designID bric
 
 // searchBrickByElementID is a helper function that performs a search on BrickLink using the element ID, and if it finds a matching design, it updates the input design with the details from the search result and returns it. This is used to handle cases where the search input is an element ID but we need to fetch the details using the element ID instead of design ID.
 func searchBrickByElementID(w http.ResponseWriter, r *http.Request, elementID brick.ElementID) (brick.Locale, brick.DesignIndex, bool) {
-	// Extract language + xlocale from context
-	lang := GetLanguageFromContext(r)
-	xlocale := GetXLocaleFromContext(r)
+	// Extract locale from context
+	locale := GetLanguageFromContext(r)
 
-	_, bricklinkBricks, err := bricklink.C().Search(string(elementID), lang)
+	_, bricklinkBricks, err := bricklink.C().Search(string(elementID), locale)
 	if err != nil {
 		zap.L().Error("Failed to search responseItems",
 			zap.Error(err),
@@ -458,7 +455,7 @@ func searchBrickByElementID(w http.ResponseWriter, r *http.Request, elementID br
 
 	// Search for the brick locale in cache
 	var valid, notfound bool
-	bLocale, valid, notfound = bLocale.LoadFromRedis(r.Context(), elementID, xlocale, false, false)
+	bLocale, valid, notfound = bLocale.LoadFromRedis(r.Context(), elementID, locale, false, false)
 	if !valid && !notfound {
 		render.NotFound(w, r, fmt.Errorf("design not found"))
 		return brick.Locale{}, nil, false

@@ -51,20 +51,3 @@ func GetLanguageFromContext(r *http.Request) language.Tag {
 	}
 	return result
 }
-
-// GetXLocaleFromContext extracts the x-locale from the request context
-func GetXLocaleFromContext(r *http.Request) language.Tag {
-	_xlocale := r.Context().Value(app.ContextKeyXLocale)
-	if _xlocale == nil {
-		tag := utils.GetLocale()
-		zap.L().Warn("No context x-locale provided, using default", zap.String("x-locale", tag.String()))
-		return tag
-	}
-	result, ok := _xlocale.(language.Tag)
-	if !ok {
-		tag := utils.GetLocale()
-		zap.L().Warn("Invalid x-locale type in context, using default", zap.String("x-locale", tag.String()))
-		return tag
-	}
-	return result
-}

@@ -21,8 +21,7 @@ func (h *Handler) FetchSetComplete(
 	ctx context.Context,
 	rs *RuntimeSet,
 	setID uuid.UUID,
-	lang language.Tag,
-	xlocale language.Tag,
+	locale language.Tag,
 ) {
 	defer func() {
 		// Handle panics gracefully
@@ -47,11 +46,11 @@ func (h *Handler) FetchSetComplete(
 
 	// Check if set price is already cached and valid
 	if !rs.Read().HasValidPrice() {
-		h.fetchSetDetails(ctx, rs, lang, xlocale, true)
+		h.fetchSetDetails(ctx, rs, locale, true)
 	}
 
 	// Fetch inventory from BrickLink (sequential)
-	ok, err := h.fetchInventory(ctx, rs, lang)
+	ok, err := h.fetchInventory(ctx, rs, locale)
 	if err != nil {
 		return // Error already handled
 	}
@@ -59,7 +58,7 @@ func (h *Handler) FetchSetComplete(
 	// Fetch bricks only if an inventory was found
 	if ok {
 		// Fetch prices from Pick-a-Brick (sequential - depends on inventory)
-		if err = h.fetchBricks(ctx, rs, lang, xlocale); err != nil {
+		if err = h.fetchBricks(ctx, rs, locale); err != nil {
 			return // Error already handled
 		}
 	}
@@ -69,7 +68,7 @@ func (h *Handler) FetchSetComplete(
 	h.PushChange(rs.ID, setID, DataTypeSet, DataTypeCompleted)
 
 	// Update the set locale in redis
-	err = set.RedisSetLocale(ctx, rs.Read().Locale, xlocale, false, true)
+	err = set.RedisSetLocale(ctx, rs.Read().Locale, locale, false, true)
 	if err != nil {
 		h.logWarning(setID, "Redis.SetLocale", err)
 		zap.L().Warn("Failed to update set locale in cache after finishing the complete set fetch",
@@ -91,8 +90,7 @@ func (h *Handler) FetchFetchSetIncomplete(
 	setID uuid.UUID,
 	missingLocale bool,
 	missingSetPrice bool,
-	lang language.Tag,
-	xlocale language.Tag,
+	locale language.Tag,
 ) {
 	defer func() {
 		// Give clients time to receive the message before cleanup
@@ -113,7 +111,7 @@ func (h *Handler) FetchFetchSetIncomplete(
 	// Check if set locale is missing or price is outdated
 	if missingLocale || missingSetPrice {
 		priceOnly := !missingLocale // Fetch more all product details if locale is missing
-		h.fetchSetDetails(ctx, rs, lang, xlocale, priceOnly)
+		h.fetchSetDetails(ctx, rs, locale, priceOnly)
 	}
 
 	// Check if we have access to the inventory
@@ -153,7 +151,7 @@ func (h *Handler) FetchFetchSetIncomplete(
 	}
 
 	// Fetch prices from Pick-a-Brick (sequential - depends on inventory)
-	if err := h.fetchBricks(ctx, rs, lang, xlocale); err != nil {
+	if err := h.fetchBricks(ctx, rs, locale); err != nil {
 		return // Error already handled
 	}
 
@@ -162,7 +160,7 @@ func (h *Handler) FetchFetchSetIncomplete(
 	h.PushChange(rs.ID, setID, DataTypeSet, DataTypeCompleted)
 
 	// Update the set locale in redis
-	err := set.RedisSetLocale(ctx, rs.Read().Locale, xlocale, false, true)
+	err := set.RedisSetLocale(ctx, rs.Read().Locale, locale, false, true)
 	if err != nil {
 		h.logWarning(setID, "Redis.SetLocale", err)
 		zap.L().Warn("Failed to update set locale in cache after finishing the incomplete set fetch",
@@ -178,26 +176,26 @@ func (h *Handler) FetchFetchSetIncomplete(
 }
 
 // fetchSetDetails fetches set details from LEGO and updates the set
-func (h *Handler) fetchSetDetails(ctx context.Context, rs *RuntimeSet, lang language.Tag, xlocale language.Tag, priceOnly bool) {
+func (h *Handler) fetchSetDetails(ctx context.Context, rs *RuntimeSet, locale language.Tag, priceOnly bool) {
 	setID := rs.Read().ID
 	// Get a copy of the current locale to pass to FetchLegoProductDetails
-	locale := rs.Read().Locale
-	ok, err := set.FetchLegoProductDetails(ctx, setID, &locale, lang, xlocale, priceOnly)
+	sLocale := rs.Read().Locale
+	ok, err := set.FetchLegoProductDetails(ctx, setID, &sLocale, locale, priceOnly)
 	if err == nil && ok {
 		// Update the runtime set with the modified locale
-		rs.set.UpdateLocale(locale)
+		rs.set.UpdateLocale(sLocale)
 
 		// Successfully fetched details, send update to clients
 		h.PushChange(rs.ID, setID, DataTypeSet, DataTypeUpdated)
 
 		// Detect a slug change that needs to be updated in Redis
-		if rs.Read().BricklinkSlug == "" && locale.Slug != "" && locale.Slug != rs.Read().BricklinkSlug {
-			err = set.RedisSetSetIDForSlug(ctx, locale, true)
+		if rs.Read().BricklinkSlug == "" && sLocale.Slug != "" && sLocale.Slug != rs.Read().BricklinkSlug {
+			err = set.RedisSetSetIDForSlug(ctx, sLocale, true)
 			if err != nil {
 				zap.L().Warn("Failed to cache slug to set ID mapping",
 					zap.Error(err),
-					zap.String("set_id", locale.ID.String()),
-					zap.String("slug", locale.Slug),
+					zap.String("set_id", sLocale.ID.String()),
+					zap.String("slug", sLocale.Slug),
 				)
 			}
 		}
@@ -348,7 +346,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 }
 
 // fetchBricks fetches prices for all Bricks in a set from Pick-a-Brick using a worker pool
-func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, lang language.Tag, xlocale language.Tag) error {
+func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, locale language.Tag) error {
 	// Calculate total bricks
 	bricksSize := len(rs.bricks.missing)
 	if bricksSize == 0 {
@@ -371,7 +369,7 @@ func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, lang language
 
 	// Worker function: fetch prices for a single design ID
 	workerFunc := func(ctx context.Context, brick set.Brick) (set.Brick, error) {
-		return h.workerHandlerBrickPrice(ctx, brick, lang, xlocale)
+		return h.workerHandlerBrickPrice(ctx, brick, locale)
 	}
 
 	// Batch handler: send batch to frontend
@@ -409,8 +407,7 @@ func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, lang language
 func (h *Handler) workerHandlerBrickPrice(
 	ctx context.Context,
 	bSet set.Brick,
-	lang language.Tag,
-	xlocale language.Tag,
+	locale language.Tag,
 ) (set.Brick, error) {
 
 	originalIDs := bSet.Locale.IDs
@@ -421,7 +418,7 @@ func (h *Handler) workerHandlerBrickPrice(
 	for _, id := range originalIDs {
 
 		// Try to find in cache first
-		bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, id.ElementID, xlocale, false, true)
+		bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, id.ElementID, locale, false, true)
 		if notFound && firstNotFoundLocale == nil {
 			// Brick Locale cached with not-found price
 			// We can consider this brick as up-to-date with a not-found price
@@ -437,7 +434,7 @@ func (h *Handler) workerHandlerBrickPrice(
 		}
 
 		// No valid cache entry for this brick ID - fetch from API
-		ok, fetchValid, fetchNotFoundLocale := bSet.Locale.Fetch(ctx, id.ElementID, lang, xlocale)
+		ok, fetchValid, fetchNotFoundLocale := bSet.Locale.Fetch(ctx, id.ElementID, locale)
 		if !ok {
 			continue // Try next ID
 		}
@@ -456,7 +453,7 @@ func (h *Handler) workerHandlerBrickPrice(
 		bSet = set.NewBrickWithUUID(bSet.UUID, bSet.Inventory, *firstNotFoundLocale)
 		zap.L().Debug("No valid price found for any brick ID, set ElementID to first not-found ID",
 			zap.String("element_id", string(firstNotFoundLocale.ID.ElementID)),
-			zap.String("xlocale", xlocale.String()),
+			zap.String("locale", locale.String()),
 		)
 	}
 
@@ -585,7 +582,7 @@ func handleFatalError(h *Handler, rs *RuntimeSet, step set.FetchErrorStep, dataT
 	h.PushChange(rs.ID, setID, dataType, DataTypeFailed)
 
 	// Try to update cache - best effort, don't fail if this fails
-	if cacheErr := set.RedisSetLocale(context.Background(), rs.Read().Locale, rs.Key().XLocale, false, false); cacheErr != nil {
+	if cacheErr := set.RedisSetLocale(context.Background(), rs.Read().Locale, rs.Key().Locale, false, false); cacheErr != nil {
 		// Log cache update failure but don't propagate
 		h.logWarning(setID, "Redis.UpdateFailedStatus", cacheErr)
 		zap.L().Warn("Failed to update failed status in cache",

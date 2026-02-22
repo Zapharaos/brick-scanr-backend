@@ -40,11 +40,11 @@ func NewHandler(ctx context.Context) *Handler {
 }
 
 // RunSet runs a runtime set, if it is not already running
-func (h *Handler) RunSet(s set.External, xlocale language.Tag, opType OperationType, ihAccess InventoryAccess) *RuntimeSet {
+func (h *Handler) RunSet(s set.External, locale language.Tag, opType OperationType, ihAccess InventoryAccess) *RuntimeSet {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
-	key := NewRuntimeSetKey(s.ID, xlocale, opType)
+	key := NewRuntimeSetKey(s.ID, locale, opType)
 	keyStr := key.String()
 
 	// Check if a runtime set with this exact key already exists
