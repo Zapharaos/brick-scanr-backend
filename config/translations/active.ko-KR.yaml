@@ -1,0 +1,20 @@
+set:
+  export:
+    sheet: "세트"
+
+    columns:
+      index: "인덱스"
+      color: "색상"
+      name: "이름"
+      element: "부품"
+      design: "디자인"
+      quantity: "수량"
+      price-unit: "단가"
+      price-total: "총 가격"
+      url: "Lego.com"
+
+status:
+  available: "재고 있음"
+  label: "상태"
+  out-of-stock: "품절"
+  unknown: "알 수 없음"

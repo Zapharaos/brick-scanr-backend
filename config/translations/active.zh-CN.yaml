@@ -1,0 +1,20 @@
+set:
+  export:
+    sheet: "套装"
+
+    columns:
+      index: "索引"
+      color: "颜色"
+      name: "名称"
+      element: "部件"
+      design: "设计"
+      quantity: "数量"
+      price-unit: "单价"
+      price-total: "总价"
+      url: "Lego.com"
+
+status:
+  available: "有货"
+  label: "状态"
+  out-of-stock: "缺货"
+  unknown: "未知"

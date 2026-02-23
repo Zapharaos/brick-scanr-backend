@@ -1,0 +1,20 @@
+set:
+  export:
+    sheet: "Sæt"
+
+    columns:
+      index: "Indeks"
+      color: "Farve"
+      name: "Navn"
+      element: "Element"
+      design: "Design"
+      quantity: "Antal"
+      price-unit: "Enhedspris"
+      price-total: "Samlet pris"
+      url: "Lego.com"
+
+status:
+  available: "På lager"
+  label: "Status"
+  out-of-stock: "Udsolgt"
+  unknown: "Ukendt"

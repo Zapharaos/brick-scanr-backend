@@ -1,0 +1,20 @@
+set:
+  export:
+    sheet: "Set"
+
+    columns:
+      index: "Index"
+      color: "Kleur"
+      name: "Naam"
+      element: "Element"
+      design: "Ontwerp"
+      quantity: "Aantal"
+      price-unit: "Stukprijs"
+      price-total: "Totale prijs"
+      url: "Lego.com"
+
+status:
+  available: "Op voorraad"
+  label: "Status"
+  out-of-stock: "Uitverkocht"
+  unknown: "Onbekend"

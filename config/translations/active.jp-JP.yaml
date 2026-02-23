@@ -1,0 +1,20 @@
+set:
+  export:
+    sheet: "セット"
+
+    columns:
+      index: "インデックス"
+      color: "色"
+      name: "名前"
+      element: "パーツ"
+      design: "デザイン"
+      quantity: "数量"
+      price-unit: "単価"
+      price-total: "合計金額"
+      url: "Lego.com"
+
+status:
+  available: "在庫あり"
+  label: "ステータス"
+  out-of-stock: "在庫切れ"
+  unknown: "不明"
