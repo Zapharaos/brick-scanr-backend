@@ -2,6 +2,7 @@ package setruntime
 
 import (
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
+	"github.com/Zapharaos/brick-scanr-backend/internal/wsruntime"
 	"github.com/google/uuid"
 )
 
@@ -26,7 +27,7 @@ type dataChange struct {
 	Id       uuid.UUID
 	Type     DataType
 	Reason   DataChangeReason
-	Progress Progress // Only used when working with batches
+	Progress wsruntime.Progress // Only used when working with batches
 }
 
 // handleDataChangeCreated handles the creation of data

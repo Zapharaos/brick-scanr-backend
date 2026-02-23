@@ -102,6 +102,11 @@ func (rs *RuntimeSet) Unregister() chan uuid.UUID {
 	return rs.unregister
 }
 
+// unregisterUUID returns the unregister channel as a send-only channel for use by wsruntime.BaseClient.
+func (rs *RuntimeSet) unregisterUUID() chan<- uuid.UUID {
+	return rs.unregister
+}
+
 // Register returns the register channel
 func (rs *RuntimeSet) Register() chan Client {
 	return rs.register

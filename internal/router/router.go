@@ -7,6 +7,7 @@ import (
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/handlers"
 	mid "github.com/Zapharaos/brick-scanr-backend/internal/middleware"
+	"github.com/Zapharaos/brick-scanr-backend/internal/searchruntime"
 	"github.com/Zapharaos/brick-scanr-backend/internal/setruntime"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -21,7 +22,7 @@ type Router struct {
 	handler *handlers.Handler
 }
 
-func New(setHandler *setruntime.Handler) *Router {
+func New(setHandler *setruntime.Handler, searchHandler *searchruntime.Handler) *Router {
 	r := chi.NewRouter()
 
 	// A good base middleware stack
@@ -53,7 +54,7 @@ func New(setHandler *setruntime.Handler) *Router {
 
 	router := &Router{
 		Router:  r,
-		handler: handlers.NewHandler(setHandler),
+		handler: handlers.NewHandler(setHandler, searchHandler),
 	}
 
 	r.Route("/api/v1", func(r chi.Router) {
@@ -61,8 +62,9 @@ func New(setHandler *setruntime.Handler) *Router {
 		// Accept-Language & X-Locale for all routes
 		r.Use(mid.LocaleMiddleware)
 
-		// Search endpoint
-		r.Get("/search/{query}", handlers.Search)
+		// Search endpoints
+		r.Get("/search/{query}", router.handler.Search)
+		r.Get("/search/ws/{id}", router.handler.SearchWebSocket)
 
 		// Set related endpoints
 		r.Route("/set", func(r chi.Router) {

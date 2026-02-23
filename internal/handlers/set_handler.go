@@ -33,7 +33,7 @@ import (
 //	@Failure		400	{object}	render.ErrorResponse			"Bad Request"
 //	@Failure		404	{object}	render.ErrorResponse		"Not found
 //	@Router			/api/v1/set/details/{id} [post]
-func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 	setId, ok := ParseParamUUIDSoft(r, "id")
 	if !ok {
 		// Param is not a UUID, might be a slug - try to resolve
@@ -98,7 +98,7 @@ func (h Handler) FetchSetDetails(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSetFetchIncomplete handles the case where we need to fetch missing elements
-func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request, setId uuid.UUID, cache *setruntime.CacheSet, locale language.Tag) {
+func (h *Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request, setId uuid.UUID, cache *setruntime.CacheSet, locale language.Tag) {
 	// Create the key for this operation
 	key := setruntime.NewRuntimeSetKey(setId, locale, setruntime.OpTypeIncomplete)
 
@@ -156,7 +156,7 @@ func (h Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Request
 }
 
 // handleFetchSetComplete handles the case where we need to perform a complete fetch
-func (h Handler) handleFetchSetComplete(w http.ResponseWriter, r *http.Request, setId uuid.UUID, ihAccess setruntime.InventoryAccess, locale language.Tag) {
+func (h *Handler) handleFetchSetComplete(w http.ResponseWriter, r *http.Request, setId uuid.UUID, ihAccess setruntime.InventoryAccess, locale language.Tag) {
 	// Retrieve BrickLink set info from cache
 	// If there was any set locale data, we would have handled it in the incomplete flow, not here
 	cacheLocaleWithCore, _, err := set.RedisGetLocale(r.Context(), setId, locale, true)
@@ -215,7 +215,7 @@ func (h Handler) handleFetchSetComplete(w http.ResponseWriter, r *http.Request, 
 //	@Failure		404		{string}	string							"Runtime Set Not Found"
 //	@Failure		500		{string}	string							"Internal Server Error"
 //	@Router			/api/v1/set/details/ws/{id} [get]
-func (h Handler) SetDetailsWebSocket(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) SetDetailsWebSocket(w http.ResponseWriter, r *http.Request) {
 	rsId, ok := ParseParamUUID(w, r, "id")
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
+	"github.com/Zapharaos/brick-scanr-backend/internal/wsruntime"
 )
 
 type PacketType string
@@ -124,13 +125,13 @@ func (p *PacketSet) ToJSON() ([]byte, error) {
 // PacketInventoryBatch is a packet to send a batch of Bricks
 type PacketInventoryBatch struct {
 	packet
-	Bricks         []set.Brick `json:"bricks"`
-	BricksProgress *Progress   `json:"bricksProgress"`
-	Status         BatchStatus `json:"status"`
+	Bricks         []set.Brick         `json:"bricks"`
+	BricksProgress *wsruntime.Progress `json:"bricksProgress"`
+	Status         BatchStatus         `json:"status"`
 }
 
 // NewPacketInventoryBatch creates a new PacketInventoryBatch
-func NewPacketInventoryBatch(bricks []set.Brick, progress *Progress, status BatchStatus) *PacketInventoryBatch {
+func NewPacketInventoryBatch(bricks []set.Brick, progress *wsruntime.Progress, status BatchStatus) *PacketInventoryBatch {
 	return &PacketInventoryBatch{
 		packet: packet{
 			Type: PacketTypeInventoryBatch,

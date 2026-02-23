@@ -10,6 +10,7 @@ import (
 	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
 	"github.com/Zapharaos/brick-scanr-backend/internal/workerpool"
+	"github.com/Zapharaos/brick-scanr-backend/internal/wsruntime"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"golang.org/x/text/language"
@@ -118,7 +119,7 @@ func (h *Handler) FetchFetchSetIncomplete(
 	if rs.ihAccess.IsValid() {
 
 		// Listen to inventory updates from the worker that is processing the inventory
-		inventory := rs.ihAccess.Inventory.listen(func(batch Progress) {
+		inventory := rs.ihAccess.Inventory.listen(func(batch wsruntime.Progress) {
 			// Handle the batch
 			h.batchHandlerListenProgress(rs, batch)
 			return
@@ -130,7 +131,7 @@ func (h *Handler) FetchFetchSetIncomplete(
 		set.SortBricksByIndex(inventory)
 		rs.set.SetBricks(inventory)
 
-		var finalBatch Progress
+		var finalBatch wsruntime.Progress
 		finalBatch.Total = len(inventory)
 		finalBatch.Done = len(inventory)
 
@@ -239,7 +240,7 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 	config := workerpool.NewConfigOptimal(inventorySize, len(h.sets))
 
 	// Create shared progress tracker
-	bprogress := NewProgress(inventorySize, config.BatchSize)
+	bprogress := wsruntime.NewProgress(inventorySize, config.BatchSize)
 
 	zap.L().Debug("Starting worker pool for inventory processing",
 		zap.Int("item_count", inventorySize),
@@ -358,7 +359,7 @@ func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, locale langua
 	config := workerpool.NewConfigOptimal(totalSize, len(h.sets))
 
 	// Create shared progress tracker
-	bprogress := NewProgress(totalSize, config.BatchSize)
+	bprogress := wsruntime.NewProgress(totalSize, config.BatchSize)
 	bprogress.Done = len(rs.bricks.final) // Start progress with already completed bricks
 
 	zap.L().Debug("Starting worker pool for price fetching",
@@ -470,7 +471,7 @@ func (h *Handler) workerHandlerBrickPrice(
 func (h *Handler) batchHandlerBricksProgress(
 	rs *RuntimeSet,
 	batch []set.Brick,
-	progress *Progress,
+	progress *wsruntime.Progress,
 	dataType DataType,
 	reuseMissingPartsCount bool,
 ) error {
@@ -541,7 +542,7 @@ func (h *Handler) batchHandlerBricksProgress(
 
 // batchHandlerListenProgress is a simplified batch handler for inventory listening
 // it only updates the runtime set and sends progress to clients without caching or external set updates
-func (h *Handler) batchHandlerListenProgress(rs *RuntimeSet, progress Progress) {
+func (h *Handler) batchHandlerListenProgress(rs *RuntimeSet, progress wsruntime.Progress) {
 
 	// Update runtime set with current batch
 	for _, item := range progress.Items {

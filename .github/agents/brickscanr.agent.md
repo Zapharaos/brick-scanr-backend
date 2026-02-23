@@ -117,4 +117,4 @@ For the exports we're using a library called go-spit (creation of excel and csv 
 - Make sure the tests are running, and add or edit tests when you add new features or change existing ones
 - When changing anything related to swagger (models, endpoints, etc.) always update the swagger documentation accordingly (swag init -ot yaml)
 - Please dont check if swagger.json or swagger.yaml we're changed in the right way, i will do that myself
-- At the end of all your changes, i want you to write ne a prompt that i can use to edit the frontend to match the backend changes you made (angular front)
+- At the end of all your changes, i want you to write me a prompt that i can use to edit the frontend to match the backend changes you made (angular front)

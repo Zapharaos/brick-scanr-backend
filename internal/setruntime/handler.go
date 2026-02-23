@@ -7,6 +7,7 @@ import (
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
 	"github.com/Zapharaos/brick-scanr-backend/internal/supervisor"
+	"github.com/Zapharaos/brick-scanr-backend/internal/wsruntime"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
@@ -162,7 +163,7 @@ func (h *Handler) PushChange(rsId, changedId uuid.UUID, dType DataType, reason D
 
 // PushBatchProgress pushes batch progress updates to the runtime set
 // This is specifically for incremental processing updates during inventory/price fetching
-func (h *Handler) PushBatchProgress(rsId uuid.UUID, dType DataType, progress Progress) {
+func (h *Handler) PushBatchProgress(rsId uuid.UUID, dType DataType, progress wsruntime.Progress) {
 	if rs := h.GetRuntimeSet(rsId); rs != nil {
 		rs.PushChange(dataChange{
 			Id:       uuid.Nil, // No specific entity ID for batch progress

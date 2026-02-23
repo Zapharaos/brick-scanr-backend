@@ -11,6 +11,7 @@ import (
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/app"
 	"github.com/Zapharaos/brick-scanr-backend/internal/router"
+	"github.com/Zapharaos/brick-scanr-backend/internal/searchruntime"
 	"github.com/Zapharaos/brick-scanr-backend/internal/setruntime"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -42,7 +43,8 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	setHandler := setruntime.NewHandler(ctx)
-	r := router.New(setHandler)
+	searchHandler := searchruntime.NewHandler(ctx)
+	r := router.New(setHandler, searchHandler)
 
 	// Get server configuration from config
 	host := viper.GetString("server.host")
@@ -83,6 +85,7 @@ func main() {
 
 	setruntime.IH().Shutdown()
 	setHandler.Shutdown()
+	searchHandler.Shutdown()
 
 	zap.L().Info("Server shutdown")
 }

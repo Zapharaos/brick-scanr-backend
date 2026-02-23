@@ -191,6 +191,37 @@ websocket:
     # Default value: 10
     max_consecutive_send_failures: 10
 
+# Search configuration
+search:
+
+  # Number of BrickLink search results above which the response switches to WebSocket mode.
+  # At or below this threshold the results are processed synchronously and returned directly.
+  # Default value: 1 (any result count > 1 triggers WebSocket mode)
+  ws_threshold: 1
+
+  # Search runtime configuration (WebSocket sessions for progressive search results)
+  runtime:
+
+    # Channel capacity for client connections
+    # Default value: 100
+    client_chan_cap: 100
+
+    # Channel capacity for batch changes
+    # Default value: 50
+    change_chan_cap: 50
+
+    # Runtime timeout (how long the session stays alive without activity)
+    # Default value: "5m"
+    timeout: "5m"
+
+    # Client timeout (how long a client can be idle before being disconnected)
+    # Default value: "5m"
+    client_timeout: "5m"
+
+    # Frequency of client timeout checks
+    # Default value: "30s"
+    client_timeout_check_freq: "30s"
+
 # Set runtime configuration
 setruntime:
   # Channel capacity for client connections

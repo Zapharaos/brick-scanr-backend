@@ -1,15 +1,14 @@
 package setruntime
 
 import (
-	"sync"
 	"time"
 
+	"github.com/Zapharaos/brick-scanr-backend/internal/wsruntime"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"github.com/spf13/viper"
-	"go.uber.org/zap"
 )
 
+// Client is the setruntime-local interface; close() is unexported intentionally.
 type Client interface {
 	ID() uuid.UUID
 	LastActivity() time.Time
@@ -17,207 +16,28 @@ type Client interface {
 	close()
 }
 
-// clientConfig holds configuration for client behavior
-type clientConfig struct {
-	PongWait                   time.Duration
-	PingPeriod                 time.Duration
-	SendChannelBufferSize      int
-	MaxConsecutiveSendFailures int
-}
-
-func newClientConfig() clientConfig {
-	// Set defaults
-	viper.SetDefault("websocket.client.pong_wait", 60)
-	viper.SetDefault("websocket.client.ping_period", 60*9/10) // 90% of pong wait
-	viper.SetDefault("websocket.client.send_channel_buffer_size", 64)
-	viper.SetDefault("websocket.client.max_consecutive_send_failures", 10)
-
-	return clientConfig{
-		PongWait:                   viper.GetDuration("websocket.client.pong_wait") * time.Second,
-		PingPeriod:                 viper.GetDuration("websocket.client.ping_period") * time.Second,
-		SendChannelBufferSize:      viper.GetInt("websocket.client.send_channel_buffer_size"),
-		MaxConsecutiveSendFailures: viper.GetInt("websocket.client.max_consecutive_send_failures"),
-	}
-}
-
+// client wraps wsruntime.BaseClient and bridges the unexported close() method.
 type client struct {
-	userId uuid.UUID
-
-	send chan []byte
-
-	rs *RuntimeSet
-
-	conn *websocket.Conn
-
-	done chan struct{}
-
-	lastActivity            time.Time
-	consecutiveSendFailures int
-	mutex                   sync.RWMutex
-
-	config clientConfig // store websocket config for this client
+	*wsruntime.BaseClient
 }
 
+// NewClient creates and starts a new WebSocket client, registering it with the runtime set.
 func NewClient(rs *RuntimeSet, conn *websocket.Conn, userId uuid.UUID) Client {
-	config := newClientConfig()
-	cli := &client{
-		send:         make(chan []byte, config.SendChannelBufferSize),
-		done:         make(chan struct{}),
-		conn:         conn,
-		rs:           rs,
-		userId:       userId,
-		lastActivity: time.Now(),
-		mutex:        sync.RWMutex{},
-		config:       config,
+	// onRegister pushes the base client into the runtime's typed register channel as a Client.
+	onRegister := func(bc *wsruntime.BaseClient) {
+		c := &client{BaseClient: bc}
+		rs.register <- c
 	}
-
-	// Register the client with the runtime set
-	rs.Register() <- cli
-
-	// Start the read and write polling
-	go cli.startReadPolling()
-	go cli.startWritePolling(config.PingPeriod)
-
-	return cli
+	base := wsruntime.NewBaseClient(onRegister, rs.unregisterUUID(), conn, userId)
+	return &client{BaseClient: base}
 }
 
-// startReadPolling starts a goroutine that reads messages from the client
-func (c *client) startReadPolling() {
-	defer func() {
-		if err := c.conn.Close(); err != nil {
-			zap.L().Error("Error closing connection", zap.Error(err))
-		}
-		c.rs.Unregister() <- c.ID()
-		select {
-		case c.done <- struct{}{}:
-		default:
-		}
-		c.close()
-	}()
-
-	c.conn.SetReadDeadline(time.Now().Add(c.config.PongWait))
-	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(c.config.PongWait)); return nil })
-
-	for {
-		_, _, err := c.conn.ReadMessage()
-		if err != nil {
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
-				return
-			}
-
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				zap.L().Error("Error reading message IsUnexpectedCloseError", zap.Error(err))
-				return
-			}
-			zap.L().Error("Error reading message", zap.Error(err))
-			return
-		}
-
-		c.mutex.Lock()
-		c.lastActivity = time.Now()
-		c.mutex.Unlock()
-
-		// We are not processing client messages in this implementation
-		/*c.rs.Receive() <- clientMessage{
-			client: c,
-			data:   message,
-		}*/
-	}
+// SendPacket delegates to the shared implementation, bridging the local Packet interface.
+func (c *client) SendPacket(p Packet) {
+	c.BaseClient.SendPacket(p)
 }
 
-func (c *client) startWritePolling(pingPeriod time.Duration) {
-	ticker := time.NewTicker(pingPeriod)
-	defer func() {
-		ticker.Stop()
-		c.conn.SetReadDeadline(time.Now().Add(time.Second)) // Set a read deadline to force the read polling to stop
-	}()
-
-	for {
-		select {
-		case message := <-c.send:
-			if message == nil {
-				_ = c.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "closing connection"))
-				return
-			}
-
-			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
-				zap.L().Error("Error writing message", zap.Error(err))
-				return
-			}
-		case <-ticker.C:
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				zap.L().Error("Error writing ping message", zap.Error(err))
-				return
-			}
-		case <-c.done:
-			return
-		}
-	}
-}
-
-// ID returns the client's ID
-func (c *client) ID() uuid.UUID {
-	return c.userId
-}
-
-// LastActivity returns the last time the client was active
-func (c *client) LastActivity() time.Time {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
-	return c.lastActivity
-}
-
-// SendPacket sends a packet to the client
-func (c *client) SendPacket(packet Packet) {
-	data, err := packet.ToJSON()
-	if err != nil {
-		zap.L().Error("Error marshalling packet", zap.Error(err))
-		return
-	}
-
-	// Non-blocking send to prevent blocking the entire application
-	// If the send channel is full/blocked, we drop the message and log it
-	select {
-	case c.send <- data:
-		// Message sent successfully - reset failure counter
-		c.mutex.Lock()
-		c.consecutiveSendFailures = 0
-		c.mutex.Unlock()
-	default:
-		// Channel is blocked, track failures
-		c.mutex.Lock()
-		c.consecutiveSendFailures++
-		failures := c.consecutiveSendFailures
-		c.mutex.Unlock()
-
-		// Log and check if we should disconnect
-		zap.L().Warn("Client send channel blocked, dropping packet",
-			zap.String("client_id", c.userId.String()),
-			zap.Int("consecutive_failures", failures))
-
-		// If too many consecutive failures, the client is likely disconnected
-		if failures >= c.config.MaxConsecutiveSendFailures {
-			zap.L().Warn("Too many consecutive send failures, closing client connection",
-				zap.String("client_id", c.userId.String()),
-				zap.Int("failures", failures))
-			c.close()
-		}
-	}
-}
-
-// close closes the client's connection, without sending or waiting for a close message
+// close delegates to the exported Close on BaseClient.
 func (c *client) close() {
-	select {
-	case c.send <- nil:
-	default:
-	}
-
-	time.AfterFunc(2*time.Second, func() {
-
-		// Attempt to send a message to the done channel
-		select {
-		case c.done <- struct{}{}:
-		default:
-		}
-	})
+	c.BaseClient.Close()
 }

@@ -5,6 +5,7 @@ import (
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
 	"github.com/Zapharaos/brick-scanr-backend/internal/utils"
+	"github.com/Zapharaos/brick-scanr-backend/internal/wsruntime"
 	"github.com/google/uuid"
 )
 
@@ -161,7 +162,7 @@ type Inventory struct {
 	writer sync.Mutex
 
 	// Listener management
-	listeners     []chan Progress
+	listeners     []chan wsruntime.Progress
 	listenerMutex sync.Mutex
 
 	// Synchronization
@@ -184,7 +185,7 @@ func newInventory(setID uuid.UUID, holder *InventoryHolder) *Inventory {
 		inventory:     make(map[uuid.UUID]set.Brick),
 		status:        set.FetchStatusPending,
 		writer:        sync.Mutex{},
-		listeners:     make([]chan Progress, 0),
+		listeners:     make([]chan wsruntime.Progress, 0),
 		listenerMutex: sync.Mutex{},
 		doneChan:      make(chan struct{}),
 		closed:        false,
@@ -258,7 +259,7 @@ func (i *Inventory) done() {
 }
 
 // write updates the inventory with a new batch of bricks and notifies listeners of the change
-func (i *Inventory) write(batch Progress) {
+func (i *Inventory) write(batch wsruntime.Progress) {
 	// Mark as fetching on the first write
 	if i.status == set.FetchStatusPending {
 		i.refCountMutex.Lock()
@@ -288,11 +289,11 @@ func (i *Inventory) write(batch Progress) {
 }
 
 // listen registers a new listener for inventory updates and waits for updates until the inventory is done
-func (i *Inventory) listen(handleBatch func(Progress)) []set.Brick {
+func (i *Inventory) listen(handleBatch func(wsruntime.Progress)) []set.Brick {
 	defer i.release() // Release reference when done listening
 
 	// Create a channel for this listener
-	listenerChan := make(chan Progress, 10)
+	listenerChan := make(chan wsruntime.Progress, 10)
 
 	// Register this listener
 	i.listenerMutex.Lock()
@@ -303,7 +304,7 @@ func (i *Inventory) listen(handleBatch func(Progress)) []set.Brick {
 	i.writer.Lock()
 
 	// Create an initial progress object with the current inventory state and total
-	var progress Progress
+	var progress wsruntime.Progress
 	for _, item := range i.inventory {
 		progress.AddItem(item)
 	}

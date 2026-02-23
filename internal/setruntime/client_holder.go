@@ -6,53 +6,44 @@ import (
 	"github.com/google/uuid"
 )
 
-// clientHolder holds clients, it to be shared between checkout and checkout type,
-// so that the clients can be updated on both sides
+// clientHolder holds clients using the setruntime-local Client interface.
+// It replicates the wsruntime.ClientHolder pattern without embedding it, because
+// the local Client interface has close() (unexported) rather than Close() (exported).
 type clientHolder struct {
 	clients     map[uuid.UUID]Client
 	clientMutex sync.RWMutex
 	needsMutex  bool
 }
 
-// newClientHolder creates a new client holder
-// child is the child client holder, if any changes are made to the parent, the changes will be propagated to the child
-// needsMutex indicates whether the client holder needs a mutex
 func newClientHolder(needsMutex bool) *clientHolder {
 	return &clientHolder{
-		clients:     make(map[uuid.UUID]Client),
-		clientMutex: sync.RWMutex{},
-		needsMutex:  needsMutex,
+		clients:    make(map[uuid.UUID]Client),
+		needsMutex: needsMutex,
 	}
 }
 
-// broadcastPacket sends a packet to all clients
-func (e *clientHolder) broadcastPacket(p Packet) {
-	if e.needsMutex {
-		e.clientMutex.RLock()
-		defer e.clientMutex.RUnlock()
+func (h *clientHolder) broadcastPacket(p Packet) {
+	if h.needsMutex {
+		h.clientMutex.RLock()
+		defer h.clientMutex.RUnlock()
 	}
-
-	for _, c := range e.clients {
+	for _, c := range h.clients {
 		c.SendPacket(p)
 	}
 }
 
-// registerClient registers a client in the clients list
-func (e *clientHolder) registerClient(cli Client) {
-	if e.needsMutex {
-		e.clientMutex.Lock()
-		defer e.clientMutex.Unlock()
+func (h *clientHolder) registerClient(c Client) {
+	if h.needsMutex {
+		h.clientMutex.Lock()
+		defer h.clientMutex.Unlock()
 	}
-
-	e.clients[cli.ID()] = cli
+	h.clients[c.ID()] = c
 }
 
-// unregisterClient unregisters a client from the clients list
-func (e *clientHolder) unregisterClient(clientId uuid.UUID) {
-	if e.needsMutex {
-		e.clientMutex.Lock()
-		defer e.clientMutex.Unlock()
+func (h *clientHolder) unregisterClient(id uuid.UUID) {
+	if h.needsMutex {
+		h.clientMutex.Lock()
+		defer h.clientMutex.Unlock()
 	}
-
-	delete(e.clients, clientId)
+	delete(h.clients, id)
 }
