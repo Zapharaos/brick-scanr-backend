@@ -69,7 +69,6 @@ func processSets(
 	progress := &batchProgress{done: 0, total: total}
 
 	batchHandler := func(batch []SearchResult) error {
-		//time.Sleep(5 * time.Second) // TODO
 		return pushBatch(rt, batch, progress, CategorySets)
 	}
 
@@ -101,7 +100,6 @@ func processBricks(
 	progress := &batchProgress{done: 0, total: total}
 
 	batchHandler := func(batch []SearchResult) error {
-		//time.Sleep(5 * time.Second) // TODO
 		return pushBatch(rt, batch, progress, CategoryBricks)
 	}
 
