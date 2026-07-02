@@ -140,12 +140,13 @@ cors:
     - "OPTIONS"
 
   # Specify allowed headers for CORS
-  # Default value: ["Accept", "Authorization", "Content-Type", "X-CSRF-Token"]
+  # Default value: ["Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Locale"]
   allowed_headers:
     - "Accept"
     - "Authorization"
     - "Content-Type"
     - "X-CSRF-Token"
+    - "X-Locale"
 
   # Allow credentials
   # Default value: false
