@@ -27,8 +27,10 @@ type Config struct {
 	MaxBackoffMs      int
 	BackoffMultiplier float64
 
-	// User agent rotation
-	UserAgents []string
+	// User agent
+	UserAgentEnabled  bool     // Whether to set a User-Agent header on requests at all
+	UserAgentRotation bool     // Whether to rotate through UserAgents; if false a single stable UA is used
+	UserAgents        []string
 
 	// Adaptive throttling thresholds
 	BaselineResponseTimeMs  int     // Expected normal response time (ms)

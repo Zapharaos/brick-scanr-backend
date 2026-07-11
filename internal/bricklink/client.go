@@ -34,6 +34,8 @@ func NewClient() *Client {
 		InitialBackoffMs:        viper.GetInt("api_clients.bricklink.retry.initial_backoff_ms"),
 		MaxBackoffMs:            viper.GetInt("api_clients.bricklink.retry.max_backoff_ms"),
 		BackoffMultiplier:       viper.GetFloat64("api_clients.bricklink.retry.backoff_multiplier"),
+		UserAgentEnabled:        viper.GetBool("api_clients.bricklink.user_agent_enabled"),
+		UserAgentRotation:       viper.GetBool("api_clients.bricklink.user_agent_rotation"),
 		UserAgents:              userAgents,
 		AdaptiveEnabled:         viper.GetBool("api_clients.bricklink.adaptive.enabled"),
 		BaselineResponseTimeMs:  viper.GetInt("api_clients.bricklink.adaptive.baseline_response_time_ms"),

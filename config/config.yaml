@@ -136,9 +136,12 @@ cors:
   enabled: true
 
   # Specify allowed origins for CORS (exact match, no wildcards).
+  # This same list also gates WebSocket upgrades (see wsruntime.CheckOrigin),
+  # so the frontend dev origin MUST be listed here or the WS handshake is rejected.
   # In dev, allow localhost only. Override in config.prod.yaml or via
   # BRICK_SCANR_CORS_ALLOWED_ORIGINS env var in production.
   allowed_origins:
+    - "http://localhost:4200" # Angular dev server (ng serve)
     - "http://localhost:3000"
     - "http://localhost:5173"
 
@@ -269,14 +272,14 @@ api_clients:
 
     # Random delay range between requests in milliseconds
     # Delay will be randomly selected between min and max for each request
-    # Default values: min=100, max=300 (0.1-0.3 seconds between requests)
-    delay_min_ms: 100
-    delay_max_ms: 300
+    # Default values: min=75, max=200 (0.1-0.3 seconds between requests)
+    delay_min_ms: 75
+    delay_max_ms: 200
 
     # Maximum requests per time window (throttle)
-    # Default value: 120 requests per 30 seconds
-    max_requests: 120
-    window_seconds: 30
+    # Default value: 180 requests per 25 seconds
+    max_requests: 180
+    window_seconds: 25
 
     # Retry configuration
     retry:
@@ -296,7 +299,16 @@ api_clients:
       # Default value: 2.0
       backoff_multiplier: 2.0
 
-    # User agent rotation (leave empty to use OS-appropriate defaults)
+    # Enable setting a User-Agent header on outgoing requests at all
+    # Default value: true
+    user_agent_enabled: true
+
+    # Rotate through the user agents list on each request
+    # If false, a single stable user agent (the first entry) is used
+    # Default value: false
+    user_agent_rotation: false
+
+    # User agents list (leave empty to use OS-appropriate defaults)
     user_agents: []
 
     # Adaptive rate limiting (monitors response times and adjusts automatically)
@@ -347,7 +359,16 @@ api_clients:
       # Default value: 2.0
       backoff_multiplier: 2.0
 
-    # User agent rotation (leave empty to use OS-appropriate defaults)
+    # Enable setting a User-Agent header on outgoing requests at all
+    # Default value: true
+    user_agent_enabled: true
+
+    # Rotate through the user agents list on each request
+    # If false, a single stable user agent (the first entry) is used
+    # Default value: false
+    user_agent_rotation: false
+
+    # User agents list (leave empty to use OS-appropriate defaults)
     user_agents: []
 
     # Adaptive rate limiting (monitors response times and adjusts automatically)
@@ -389,7 +410,16 @@ api_clients:
       # Default value: 2.0
       backoff_multiplier: 2.0
 
-    # User agent rotation (leave empty to use OS-appropriate defaults)
+    # Enable setting a User-Agent header on outgoing requests at all
+    # Default value: true
+    user_agent_enabled: true
+
+    # Rotate through the user agents list on each request
+    # If false, a single stable user agent (the first entry) is used
+    # Default value: false
+    user_agent_rotation: false
+
+    # User agents list (leave empty to use OS-appropriate defaults)
     user_agents: []
 
     # Adaptive rate limiting (monitors response times and adjusts automatically)

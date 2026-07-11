@@ -6,8 +6,10 @@ import (
 	"time"
 )
 
-// GetNextUserAgent returns a random user agent from the configured list
-// Returns empty string if no user agents are configured
+// GetNextUserAgent returns a user agent from the configured list.
+// When rotation is enabled, a random user agent is selected; otherwise the
+// first (stable) user agent is returned.
+// Returns empty string if no user agents are configured.
 func (t *Throttler) GetNextUserAgent() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -16,13 +18,21 @@ func (t *Throttler) GetNextUserAgent() string {
 		return ""
 	}
 
+	if !t.config.UserAgentRotation {
+		// Rotation disabled: use a single stable, coherent user agent
+		return t.config.UserAgents[0]
+	}
+
 	// Select a random user agent using current time as seed
 	randomIndex := int(time.Now().UnixNano()) % len(t.config.UserAgents)
 	return t.config.UserAgents[randomIndex]
 }
 
-// SetRequestUserAgent sets a random user agent on the request if configured
+// SetRequestUserAgent sets a random user agent on the request when enabled
 func (t *Throttler) SetRequestUserAgent(req *http.Request) {
+	if !t.config.UserAgentEnabled {
+		return
+	}
 	if userAgent := t.GetNextUserAgent(); userAgent != "" {
 		req.Header.Set("User-Agent", userAgent)
 	}

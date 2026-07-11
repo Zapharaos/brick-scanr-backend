@@ -41,6 +41,8 @@ func NewClient() *Client {
 		InitialBackoffMs:        viper.GetInt("api_clients.pickabrick.retry.initial_backoff_ms"),
 		MaxBackoffMs:            viper.GetInt("api_clients.pickabrick.retry.max_backoff_ms"),
 		BackoffMultiplier:       viper.GetFloat64("api_clients.pickabrick.retry.backoff_multiplier"),
+		UserAgentEnabled:        viper.GetBool("api_clients.pickabrick.user_agent_enabled"),
+		UserAgentRotation:       viper.GetBool("api_clients.pickabrick.user_agent_rotation"),
 		UserAgents:              userAgents,
 		AdaptiveEnabled:         viper.GetBool("api_clients.pickabrick.adaptive.enabled"),
 		BaselineResponseTimeMs:  viper.GetInt("api_clients.pickabrick.adaptive.baseline_response_time_ms"),
