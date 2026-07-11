@@ -57,6 +57,12 @@ func New(setHandler *setruntime.Handler, searchHandler *searchruntime.Handler) *
 		handler: handlers.NewHandler(setHandler, searchHandler),
 	}
 
+	// Public health/readiness endpoint for uptime monitoring (e.g. Uptime Kuma)
+	// and status displays. Mounted at the root so it's free of the locale
+	// middleware and per-IP rate limiting applied under /api/v1.
+	r.Get("/health", handlers.Health)
+	r.Head("/health", handlers.Health)
+
 	r.Route("/api/v1", func(r chi.Router) {
 
 		// Accept-Language & X-Locale for all routes
