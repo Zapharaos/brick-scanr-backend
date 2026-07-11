@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/brick"
@@ -84,8 +85,8 @@ func (h *Handler) FetchSetComplete(
 	)
 }
 
-// FetchFetchSetIncomplete fetches Bricks that are missing for the requested currency
-func (h *Handler) FetchFetchSetIncomplete(
+// FetchSetIncomplete fetches Bricks that are missing for the requested currency
+func (h *Handler) FetchSetIncomplete(
 	ctx context.Context,
 	rs *RuntimeSet,
 	setID uuid.UUID,
@@ -367,6 +368,12 @@ func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, locale langua
 		zap.Int("batch_size", config.BatchSize),
 	)
 
+	// Warm the Pick-a-Brick cache by fetching prices grouped by design ID.
+	// Each design fetch returns every element (all colors) in a single request, so
+	// the per-brick worker below resolves from cache instead of issuing one
+	// Pick-a-Brick request per element.
+	h.prefetchDesignPrices(ctx, rs, locale)
+
 	// Worker function: fetch prices for a single design ID
 	workerFunc := func(ctx context.Context, brick set.Brick) (set.Brick, error) {
 		return h.workerHandlerBrickPrice(ctx, brick, locale)
@@ -401,6 +408,63 @@ func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, locale langua
 	)
 
 	return nil
+}
+
+// prefetchDesignPrices warms the Pick-a-Brick price cache for all missing bricks by
+// grouping them by design ID and issuing one FetchBricksByDesignID request per unique
+// design. Each such request caches every element (all colors) of the design, so the
+// subsequent per-brick worker pool resolves prices from cache instead of issuing one
+// request per element.
+//
+// Measurement: it logs the number of missing bricks (the previous worst-case request
+// count, one per element) against the number of design requests actually issued. Any
+// residual per-element requests still appear in the "Fetching Pick-a-Brick element by
+// brick ID" debug logs from FetchBricksByBrickID.
+func (h *Handler) prefetchDesignPrices(ctx context.Context, rs *RuntimeSet, locale language.Tag) {
+	missing := rs.bricks.getMissingAsSlice()
+
+	// Collect unique design IDs across all missing bricks (a brick may carry several
+	// IDs for alternate designs).
+	designIDs := make(map[brick.DesignID]struct{})
+	for _, b := range missing {
+		for _, id := range b.Locale.IDs {
+			if strings.TrimSpace(string(id.DesignID)) != "" {
+				designIDs[id.DesignID] = struct{}{}
+			}
+		}
+	}
+
+	if len(designIDs) == 0 {
+		return
+	}
+
+	zap.L().Debug("Prefetching Pick-a-Brick prices grouped by design",
+		zap.Int("missing_bricks", len(missing)),
+		zap.Int("unique_designs", len(designIDs)),
+	)
+
+	designRequests := 0
+	elementsCached := 0
+	for designID := range designIDs {
+		count, err := brick.PrefetchDesignBricks(ctx, designID, locale)
+		designRequests++
+		if err != nil {
+			h.logWarning(rs.Read().ID, "Prefetch.DesignPrices", err)
+			zap.L().Warn("Failed to prefetch design prices",
+				zap.Error(err),
+				zap.String("design_id", string(designID)),
+			)
+			continue
+		}
+		elementsCached += count
+	}
+
+	zap.L().Info("Completed Pick-a-Brick design prefetch",
+		zap.String("set_id", rs.Read().ID.String()),
+		zap.Int("missing_bricks", len(missing)),
+		zap.Int("design_requests", designRequests),
+		zap.Int("elements_cached", elementsCached),
+	)
 }
 
 // workerHandlerBrickPrice is the worker function for fetching and updating a single brick's price, with cache checking and fallback to API

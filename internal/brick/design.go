@@ -94,6 +94,49 @@ func (d *Design) FetchMinimal(ctx context.Context, locale language.Tag) error {
 	return nil
 }
 
+// PrefetchDesignBricks fetches all bricks (all colors) for a design ID from the
+// Pick-a-Brick API in a single request and caches each element's locale in Redis.
+//
+// It is used to warm the cache before per-brick price resolution: many bricks in a
+// set share the same design (different colors), so grouping by design turns N
+// per-element requests into one request per unique design. Subsequent per-element
+// LoadFromRedis lookups then resolve from cache instead of hitting the API.
+//
+// It returns the number of elements returned by the API (0 on not-found), which is
+// useful for measuring request savings. A not-found design is not an error.
+func PrefetchDesignBricks(ctx context.Context, designID DesignID, locale language.Tag) (int, error) {
+	pabBricks, err := pickabrick.C().FetchBricksByDesignID(string(designID), locale)
+	if err != nil {
+		// Not-found is expected for designs absent from Pick-a-Brick: skip silently.
+		if errors.Is(err, pickabrick.ErrBrickNotFound) {
+			return 0, nil
+		}
+		return 0, err
+	}
+
+	for _, pab := range pabBricks {
+		// Map result to local representation
+		mappedB := MapLocaleFromPickabrick(Locale{}, pab, locale)
+
+		// Preserve an existing valid/not-found cache entry (which may hold a lower
+		// price) rather than overwriting it. Mirrors Design.FetchBricks semantics.
+		if _, valid, notfound := mappedB.LoadFromRedis(ctx, mappedB.ID.ElementID, locale, false, true); valid || notfound {
+			continue
+		}
+
+		if cacheErr := RedisSetLocale(ctx, mappedB, locale, true); cacheErr != nil {
+			zap.L().Warn("Failed to cache prefetched design brick",
+				zap.Error(cacheErr),
+				zap.String("element_id", string(mappedB.ID.ElementID)),
+				zap.String("design_id", string(designID)),
+			)
+			// Not fatal, continue caching the rest
+		}
+	}
+
+	return len(pabBricks), nil
+}
+
 // FetchBricks fetches the bricks associated with this design ID from the pick-a-brick API, updates the design with the element IDs, and caches the data.
 func (d *Design) FetchBricks(ctx context.Context, locale language.Tag) ([]Locale, error) {
 	// Fetch all bricks matching this design ID
