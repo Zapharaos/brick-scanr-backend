@@ -210,6 +210,8 @@ func (rs *RuntimeSet) handleDataChange(change dataChange) {
 		rs.handleDataChangeFailed(change)
 	case DataTypeProgress:
 		rs.handleDataChangeProgress(change)
+	case DataTypeThrottle:
+		rs.handleDataChangeThrottle(change)
 	}
 }
 

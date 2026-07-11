@@ -58,6 +58,11 @@ func NewClient() *Client {
 	}
 }
 
+// ThrottlerStatus returns the current status of the client's throttler.
+func (c *Client) ThrottlerStatus() throttle.Status {
+	return c.throttler.GetStatus()
+}
+
 var (
 	_globalClient     *Client
 	_globalClientOnce sync.Once

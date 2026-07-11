@@ -38,6 +38,43 @@ type Config struct {
 	AdaptiveEnabled         bool    // Enable adaptive throttling
 }
 
+// State is a simplified, client-facing view of the throttler status.
+type State string
+
+const (
+	StateNormal  State = "normal"  // Operating normally
+	StateSlowed  State = "slowed"  // Server is stressed, requests are being slowed down
+	StateBlocked State = "blocked" // Blocked by the server (429), waiting until ThrottleEndsAt
+)
+
+// severity ranks states so they can be compared/aggregated (higher = worse).
+func (s State) severity() int {
+	switch s {
+	case StateBlocked:
+		return 2
+	case StateSlowed:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// MoreSevereThan reports whether s represents a worse state than other.
+func (s State) MoreSevereThan(other State) bool {
+	return s.severity() > other.severity()
+}
+
+// SimpleState derives a simplified, client-facing State from the status at time now.
+func (s Status) SimpleState(now time.Time) State {
+	if s.IsBlocked && s.ThrottleEndsAt.After(now) {
+		return StateBlocked
+	}
+	if s.IsSlowTraffic || s.AdaptationLevel >= 2 {
+		return StateSlowed
+	}
+	return StateNormal
+}
+
 // Status represents the current state of the throttler
 type Status struct {
 	IsBlocked            bool          // Currently blocked by server (429 or rate limit error)

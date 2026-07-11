@@ -6,6 +6,7 @@ import (
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
 	"github.com/Zapharaos/brick-scanr-backend/internal/supervisor"
+	"github.com/Zapharaos/brick-scanr-backend/internal/throttle"
 	"github.com/Zapharaos/brick-scanr-backend/internal/wsruntime"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -167,6 +168,17 @@ func (h *Handler) PushBatchProgress(rsId uuid.UUID, dType DataType, progress wsr
 			Type:     dType,
 			Reason:   DataTypeProgress,
 			Progress: progress,
+		})
+	}
+}
+
+// PushThrottleStatus pushes an upstream throttle state update to the runtime set
+func (h *Handler) PushThrottleStatus(rsId uuid.UUID, state throttle.State, resumeAt int64) {
+	if rs := h.GetRuntimeSet(rsId); rs != nil {
+		rs.PushChange(dataChange{
+			Reason:           DataTypeThrottle,
+			ThrottleState:    state,
+			ThrottleResumeAt: resumeAt,
 		})
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
+	"github.com/Zapharaos/brick-scanr-backend/internal/throttle"
 	"github.com/Zapharaos/brick-scanr-backend/internal/wsruntime"
 )
 
@@ -14,6 +15,7 @@ const (
 	PacketTypeFatal          PacketType = "fatal"
 	PacketTypeSet            PacketType = "set"
 	PacketTypeInventoryBatch PacketType = "inventoryBatch"
+	PacketTypeThrottleStatus PacketType = "throttleStatus"
 )
 
 type BatchStatus string
@@ -31,6 +33,7 @@ type packetSpec struct {
 	PacketFatal          PacketFatal          `json:"packetFatal"`
 	PacketSet            PacketSet            `json:"packetSet"`
 	PacketInventoryBatch PacketInventoryBatch `json:"packetInventoryBatch"`
+	PacketThrottleStatus PacketThrottleStatus `json:"packetThrottleStatus"`
 }
 
 // Packet interface
@@ -144,5 +147,37 @@ func NewPacketInventoryBatch(bricks []set.Brick, progress *wsruntime.Progress, s
 
 // ToJSON returns the JSON representation of the packet
 func (p *PacketInventoryBatch) ToJSON() ([]byte, error) {
+	return json.Marshal(p)
+}
+
+// --------------------------------------------
+// --------------------------------------------
+// --------------------------------------------
+
+// PacketThrottleStatus informs the client that the upstream APIs are throttling
+// us, so a frozen progress bar can be explained ("resuming in ~Xs") instead of
+// looking broken.
+type PacketThrottleStatus struct {
+	packet
+	// State is the current throttle state: normal / slowed / blocked.
+	State throttle.State `json:"state"`
+	// ResumeAt is the epoch milliseconds at which the block is expected to end.
+	// Only meaningful when State is "blocked"; omitted otherwise.
+	ResumeAt int64 `json:"resumeAt,omitempty"`
+}
+
+// NewPacketThrottleStatus creates a new PacketThrottleStatus
+func NewPacketThrottleStatus(state throttle.State, resumeAt int64) *PacketThrottleStatus {
+	return &PacketThrottleStatus{
+		packet: packet{
+			Type: PacketTypeThrottleStatus,
+		},
+		State:    state,
+		ResumeAt: resumeAt,
+	}
+}
+
+// ToJSON returns the JSON representation of the packet
+func (p *PacketThrottleStatus) ToJSON() ([]byte, error) {
 	return json.Marshal(p)
 }

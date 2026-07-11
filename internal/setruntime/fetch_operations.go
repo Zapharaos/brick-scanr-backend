@@ -36,6 +36,12 @@ func (h *Handler) FetchSetComplete(
 		h.StopRuntimeSet(rs.Key())
 	}()
 
+	// Monitor upstream throttling for the duration of the fetch so clients can be
+	// told when a stalled progress bar is due to rate limiting rather than a bug.
+	throttleStop := make(chan struct{})
+	go h.monitorThrottle(rs, throttleStop)
+	defer close(throttleStop)
+
 	zap.L().Info("Starting complete set details fetch",
 		zap.String("runtime_id", rs.ID.String()),
 		zap.String("key", rs.Key().String()),
@@ -99,6 +105,12 @@ func (h *Handler) FetchSetIncomplete(
 		time.Sleep(3 * time.Second)
 		h.StopRuntimeSet(rs.Key())
 	}()
+
+	// Monitor upstream throttling for the duration of the fetch so clients can be
+	// told when a stalled progress bar is due to rate limiting rather than a bug.
+	throttleStop := make(chan struct{})
+	go h.monitorThrottle(rs, throttleStop)
+	defer close(throttleStop)
 
 	zap.L().Info("Starting bricks fetch",
 		zap.String("runtime_id", rs.ID.String()),

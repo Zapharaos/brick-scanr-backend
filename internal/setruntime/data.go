@@ -2,6 +2,7 @@ package setruntime
 
 import (
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
+	"github.com/Zapharaos/brick-scanr-backend/internal/throttle"
 	"github.com/Zapharaos/brick-scanr-backend/internal/wsruntime"
 	"github.com/google/uuid"
 )
@@ -21,6 +22,7 @@ const (
 	DataTypeCompleted
 	DataTypeFailed
 	DataTypeProgress
+	DataTypeThrottle
 )
 
 type dataChange struct {
@@ -28,6 +30,10 @@ type dataChange struct {
 	Type     DataType
 	Reason   DataChangeReason
 	Progress wsruntime.Progress // Only used when working with batches
+
+	// Throttle fields, only used when Reason is DataTypeThrottle
+	ThrottleState    throttle.State
+	ThrottleResumeAt int64
 }
 
 // handleDataChangeCreated handles the creation of data
@@ -116,4 +122,10 @@ func (rs *RuntimeSet) handleDataChangeProgress(change dataChange) {
 		// Unknown data type for progress, ignore
 		return
 	}
+}
+
+// handleDataChangeThrottle broadcasts the current upstream throttle state so the
+// frontend can explain a stalled progress bar instead of appearing broken.
+func (rs *RuntimeSet) handleDataChangeThrottle(change dataChange) {
+	rs.broadcastPacket(NewPacketThrottleStatus(change.ThrottleState, change.ThrottleResumeAt))
 }
