@@ -138,7 +138,7 @@ func (h *Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Start goroutine to fetch missing bricks
-	go h.srh.FetchFetchSetIncomplete(
+	go h.srh.FetchSetIncomplete(
 		context.Background(),
 		rs,
 		setId,

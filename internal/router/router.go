@@ -72,7 +72,7 @@ func New(setHandler *setruntime.Handler, searchHandler *searchruntime.Handler) *
 			// Details
 			r.With(httprate.LimitByIP(
 				viper.GetInt("rate_limit.set_details.requests"),
-				viper.GetDuration("rate_limit.set_details.window")*time.Second,
+				time.Duration(viper.GetInt("rate_limit.set_details.window"))*time.Second,
 			)).Post("/details/{id}", router.handler.FetchSetDetails)
 			r.Get("/details/ws/{id}", router.handler.SetDetailsWebSocket)
 
@@ -86,13 +86,13 @@ func New(setHandler *setruntime.Handler, searchHandler *searchruntime.Handler) *
 			// Details by design ID
 			r.With(httprate.LimitByIP(
 				viper.GetInt("rate_limit.brick_details.requests"),
-				viper.GetDuration("rate_limit.brick_details.window")*time.Second,
+				time.Duration(viper.GetInt("rate_limit.brick_details.window"))*time.Second,
 			)).Get("/details/design/{id}", handlers.FetchBrickDetailsByDesign)
 
 			// Details by element ID
 			r.With(httprate.LimitByIP(
 				viper.GetInt("rate_limit.brick_details.requests"),
-				viper.GetDuration("rate_limit.brick_details.window")*time.Second,
+				time.Duration(viper.GetInt("rate_limit.brick_details.window"))*time.Second,
 			)).Get("/details/element/{id}", handlers.FetchBrickDetailsByElement)
 		})
 	})

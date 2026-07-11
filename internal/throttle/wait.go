@@ -91,43 +91,49 @@ func (t *Throttler) Wait(ctx context.Context) error {
 		}
 	}
 
-	// Clean up old requests outside the sliding window
+	// Check rate limit with re-validation after each sleep to prevent window overshoot under concurrency
 	windowDuration := time.Duration(t.config.WindowSeconds) * time.Second
-	cutoff := now.Add(-windowDuration)
-	newLog := make([]time.Time, 0, len(t.requestLog))
-	for _, reqTime := range t.requestLog {
-		if reqTime.After(cutoff) {
-			newLog = append(newLog, reqTime)
+	for {
+		// Clean up old requests outside the sliding window
+		cutoff := now.Add(-windowDuration)
+		newLog := make([]time.Time, 0, len(t.requestLog))
+		for _, reqTime := range t.requestLog {
+			if reqTime.After(cutoff) {
+				newLog = append(newLog, reqTime)
+			}
 		}
-	}
-	t.requestLog = newLog
+		t.requestLog = newLog
 
-	// Check if we've exceeded the rate limit
-	if len(t.requestLog) >= t.config.MaxRequests {
+		if len(t.requestLog) < t.config.MaxRequests {
+			break
+		}
+
 		// Need to wait until the oldest request falls outside the window
 		oldestRequest := t.requestLog[0]
 		waitUntil := oldestRequest.Add(windowDuration)
 		waitTime := waitUntil.Sub(now)
 
-		if waitTime > 0 {
-			zap.L().Debug("Throttler: throttling - max requests reached",
-				zap.String("client", t.name),
-				zap.Int("max_requests", t.config.MaxRequests),
-				zap.Duration("window", windowDuration),
-				zap.Duration("wait_time", waitTime))
-
-			t.mu.Unlock()
-
-			select {
-			case <-ctx.Done():
-				t.mu.Lock()
-				return ctx.Err()
-			case <-time.After(waitTime):
-			}
-
-			t.mu.Lock()
-			now = time.Now()
+		if waitTime <= 0 {
+			break
 		}
+
+		zap.L().Debug("Throttler: throttling - max requests reached",
+			zap.String("client", t.name),
+			zap.Int("max_requests", t.config.MaxRequests),
+			zap.Duration("window", windowDuration),
+			zap.Duration("wait_time", waitTime))
+
+		t.mu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			t.mu.Lock()
+			return ctx.Err()
+		case <-time.After(waitTime):
+		}
+
+		t.mu.Lock()
+		now = time.Now()
 	}
 
 	// Record this request

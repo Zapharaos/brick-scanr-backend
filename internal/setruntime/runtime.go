@@ -189,11 +189,9 @@ func (rs *RuntimeSet) run() {
 			rs.runClientExpireChecker()
 
 		case <-setActivityTimer.C:
-			rs.stop()
 			return
 
 		case <-rs.done:
-			rs.stop()
 			return
 		}
 	}
@@ -234,16 +232,7 @@ func (rs *RuntimeSet) handleClientConnect(client Client) {
 
 // handleClientDisconnect handles a client disconnect
 func (rs *RuntimeSet) handleClientDisconnect(id uuid.UUID) {
-	defer func() {
-		rs.unregisterClient(id)
-	}()
-
-	rs.clientMutex.RLock()
-	_, ok := rs.clients[id]
-	rs.clientMutex.RUnlock()
-	if !ok {
-		return
-	}
+	rs.unregisterClient(id)
 }
 
 // runClientExpireChecker handles client expiration

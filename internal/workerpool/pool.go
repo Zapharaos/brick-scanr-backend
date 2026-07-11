@@ -20,7 +20,6 @@ type Pool[TJob any, TResult any] struct {
 	cancel         context.CancelFunc
 	jobs           chan TJob
 	results        chan TResult
-	errors         chan error
 	collectorDone  chan error
 	wg             sync.WaitGroup
 	resultsMutex   sync.Mutex
@@ -84,7 +83,6 @@ func NewPool[TJob any, TResult any](
 		cancel:        cancel,
 		jobs:          make(chan TJob, config.Workers*2),
 		results:       make(chan TResult, config.Workers*2),
-		errors:        make(chan error, config.Workers),
 		collectorDone: make(chan error, 1),
 		currentBatch:  make([]TResult, 0, batchCapacity),
 	}
@@ -142,16 +140,7 @@ func (p *Pool[TJob, TResult]) Process(jobs []TJob) error {
 
 	// Wait for workers
 	p.wg.Wait()
-	close(p.errors)
 	close(p.results)
-
-	// Check for worker errors
-	for err := range p.errors {
-		if err != nil {
-			p.cancel() // Cancel collector on worker error
-			return err
-		}
-	}
 
 	// Wait for collector to finish
 	return <-p.collectorDone
@@ -160,9 +149,6 @@ func (p *Pool[TJob, TResult]) Process(jobs []TJob) error {
 // worker processes jobs from the jobs channel
 func (p *Pool[TJob, TResult]) worker(workerID int) {
 	defer p.wg.Done()
-	defer func() {
-		p.errors <- nil // Signal completion
-	}()
 
 	for {
 		select {
@@ -222,6 +208,7 @@ func (p *Pool[TJob, TResult]) collectBatched() {
 				// Channel closed - send final batch if any
 				if len(p.currentBatch) > 0 {
 					if err := p.batchHandler(p.currentBatch); err != nil {
+						p.cancel()
 						p.collectorDone <- err
 						return
 					}
@@ -238,6 +225,7 @@ func (p *Pool[TJob, TResult]) collectBatched() {
 			// Send batch if full
 			if len(p.currentBatch) >= p.config.BatchSize {
 				if err := p.batchHandler(p.currentBatch); err != nil {
+					p.cancel()
 					p.collectorDone <- err
 					return
 				}
@@ -248,6 +236,7 @@ func (p *Pool[TJob, TResult]) collectBatched() {
 			// Periodic flush of partial batch
 			if len(p.currentBatch) > 0 {
 				if err := p.batchHandler(p.currentBatch); err != nil {
+					p.cancel()
 					p.collectorDone <- err
 					return
 				}
@@ -275,6 +264,7 @@ func (p *Pool[TJob, TResult]) collectStreaming() {
 			// Process result individually
 			if p.resultHandler != nil {
 				if err := p.resultHandler(result); err != nil {
+					p.cancel()
 					p.collectorDone <- err
 					return
 				}

@@ -3,6 +3,7 @@ package lego
 import (
 	"errors"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/throttle"
@@ -55,13 +56,16 @@ func NewClient() *Client {
 	}
 }
 
-var _globalClient *Client
+var (
+	_globalClient     *Client
+	_globalClientOnce sync.Once
+)
 
 // C is used to access the global Client singleton
 func C() *Client {
-	if _globalClient == nil {
+	_globalClientOnce.Do(func() {
 		_globalClient = NewClient()
-	}
+	})
 	return _globalClient
 }
 
