@@ -92,7 +92,12 @@ func FetchLegoProductDetails(ctx context.Context, setID uuid.UUID, set *Locale, 
 	}
 
 	if !priceOnly {
-		set.ImageURL = legoProduct.BaseImgUrl
+		// LEGO image is preferred as primary; keep the Bricklink image (set earlier
+		// in FetchBricklinkDetails) as fallback in case the LEGO CDN image fails to load.
+		if legoProduct.BaseImgUrl != "" {
+			set.FallbackImageURL = set.ImageURL
+			set.ImageURL = legoProduct.BaseImgUrl
+		}
 		set.Status = utils.MapLegoProductStatus(*legoProduct)
 		set.Name = legoProduct.Name
 		set.Slug = legoProduct.Slug

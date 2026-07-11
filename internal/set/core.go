@@ -15,11 +15,12 @@ import (
 
 // Core represents the core information of a Lego set.
 type Core struct {
-	ID           uuid.UUID `json:"id"`
-	Number       string    `json:"number"`
-	Parts        int       `json:"parts"`
-	ImageURL     string    `json:"image_url"`
-	YearReleased int       `json:"year_released"`
+	ID               uuid.UUID `json:"id"`
+	Number           string    `json:"number"`
+	Parts            int       `json:"parts"`
+	ImageURL         string    `json:"image_url"`
+	FallbackImageURL string    `json:"fallback_image_url,omitempty"`
+	YearReleased     int       `json:"year_released"`
 
 	// Inventory information
 	Bricks          []Brick     `json:"bricks"`
