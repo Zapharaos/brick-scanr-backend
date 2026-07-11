@@ -40,17 +40,28 @@ redis:
     # Default value: 2592000 (30 days)
     set: 2592000
 
-    # Time to live for set price data in seconds (prices fluctuate more)
-    # Default value: 86400 (24 hours)
-    set_price: 86400
+    # Physical storage TTL for set price data in seconds (how long the key survives in Redis)
+    # Keep long so stale-while-revalidate can serve cached data while refreshing in background
+    # Default value: 5184000 (60 days)
+    set_price: 5184000
+
+    # Logical freshness window for set prices in seconds
+    # After this delay, the price is considered stale: served immediately from cache, refreshed in background via WebSocket
+    # PaB prices change rarely (occasional revaluations) so 7 days is already conservative
+    # Default value: 2592000 (30 days)
+    set_price_freshness: 2592000
 
     # Time to live for brick metadata in seconds (design rarely changes)
     # Default value: 2592000 (30 days)
     brick: 2592000
 
-    # Time to live for brick price data in seconds (prices can change)
-    # Default value: 86400 (24 hours)
-    brick_price: 86400
+    # Physical storage TTL for brick price data in seconds (how long the key survives in Redis)
+    # Default value: 5184000 (60 days)
+    brick_price: 5184000
+
+    # Logical freshness window for brick prices in seconds
+    # Default value: 2592000 (30 days)
+    brick_price_freshness: 2592000
 
     # Minimum TTL threshold in seconds - if a cached key has less than this remaining TTL,
     # it will be considered as "about to expire" and will be refreshed to prevent data loss

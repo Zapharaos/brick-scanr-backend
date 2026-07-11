@@ -21,9 +21,11 @@ type RedisDB struct {
 
 type TTLS struct {
 	Set                      time.Duration
-	SetPrice                 time.Duration
+	SetPrice                 time.Duration // physical Redis TTL (how long the key survives)
+	SetPriceFreshness        time.Duration // logical freshness TTL (when a price is considered stale)
 	Brick                    time.Duration
-	BrickPrice               time.Duration
+	BrickPrice               time.Duration // physical Redis TTL (how long the key survives)
+	BrickPriceFreshness      time.Duration // logical freshness TTL (when a price is considered stale)
 	SetBricklinkMinThreshold time.Duration
 }
 
@@ -68,8 +70,10 @@ func NewRedisDB() RedisDB {
 	ttls := TTLS{
 		Set:                      viper.GetDuration("redis.ttls.set") * time.Second,
 		SetPrice:                 viper.GetDuration("redis.ttls.set_price") * time.Second,
+		SetPriceFreshness:        viper.GetDuration("redis.ttls.set_price_freshness") * time.Second,
 		Brick:                    viper.GetDuration("redis.ttls.brick") * time.Second,
 		BrickPrice:               viper.GetDuration("redis.ttls.brick_price") * time.Second,
+		BrickPriceFreshness:      viper.GetDuration("redis.ttls.brick_price_freshness") * time.Second,
 		SetBricklinkMinThreshold: viper.GetDuration("redis.ttls.set_bricklink_min_threshold") * time.Second,
 	}
 

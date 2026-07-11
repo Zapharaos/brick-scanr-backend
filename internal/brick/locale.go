@@ -48,14 +48,14 @@ func (l *Locale) BuildPickabrickURL(tag language.Tag) {
 	l.PickabrickURL = "https://www.lego.com/" + tag.String() + "/pick-and-build/pick-a-brick?selectedElement=" + id
 }
 
-// HasValidPrice checks if the Brick has a valid and up-to-date
+// HasValidPrice checks if the brick price is within the freshness window
 func (l *Locale) HasValidPrice() bool {
-	return l.Price.IsValid(database.DB().Redis().TTLS.BrickPrice)
+	return l.Price.IsValid(database.DB().Redis().TTLS.BrickPriceFreshness)
 }
 
-// HasOutdatedPrice checks if the Brick has a price that is outdated based on the configured TTL for Brick prices
+// HasOutdatedPrice checks if the brick price has exceeded the freshness window
 func (l *Locale) HasOutdatedPrice() bool {
-	return l.Price.IsOutdated(database.DB().Redis().TTLS.BrickPrice)
+	return l.Price.IsOutdated(database.DB().Redis().TTLS.BrickPriceFreshness)
 }
 
 // HasLowerPrice compares the price of the current Brick with another Brick for the given tag

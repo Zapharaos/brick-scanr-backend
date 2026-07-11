@@ -58,9 +58,9 @@ type Locale struct {
 	Price           utils.Price  `json:"price"`
 }
 
-// HasValidPrice checks if the Brick has a valid and up-to-date
+// HasValidPrice checks if the set price is within the freshness window
 func (l *Locale) HasValidPrice() bool {
-	return l.Price.IsValid(database.DB().Redis().TTLS.SetPrice)
+	return l.Price.IsValid(database.DB().Redis().TTLS.SetPriceFreshness)
 }
 
 // BuildLegoURL constructs the LEGO product URL based on the set's slug and the provided locale

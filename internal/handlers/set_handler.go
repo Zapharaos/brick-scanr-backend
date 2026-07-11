@@ -147,11 +147,12 @@ func (h *Handler) handleSetFetchIncomplete(w http.ResponseWriter, r *http.Reques
 		locale,
 	)
 
-	// Return websocket ID for client to connect
-	// Return the cached set data as well so the client can display it while waiting for the missing data to be fetched
+	// Return stale cached data immediately alongside the WebSocket ID so the client can
+	// display prices right away while the background refresh completes (stale-while-revalidate).
 	render.Accepted(w, r, set.DetailsResponse{
 		Completed:   false,
 		WebsocketID: rs.ID.String(),
+		Set:         cache.Set,
 	})
 }
 
