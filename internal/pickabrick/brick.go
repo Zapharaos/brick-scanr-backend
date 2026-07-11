@@ -81,39 +81,6 @@ func (b *Brick) GetImageURL() string {
 	return ""
 }
 
-// GetValidatedImageURL returns a validated image URL for this brick.
-// If validation is enabled in the client config, it checks if the CDN PNG exists.
-// If the CDN image doesn't exist or validation fails, it falls back to the API's imageUrl.
-// This is the recommended method to use when you need reliable image URLs.
-func (b *Brick) GetValidatedImageURL(client *Client) string {
-	cdnURL := ""
-	if b.ID != "" {
-		cdnURL = fmt.Sprintf("%s/%s/00001.png", CDNImageSpinPhotoreal, b.ID)
-	}
-
-	// If validation is disabled, return CDN URL (or fallback if no CDN URL)
-	if client == nil || !client.validateImages {
-		if cdnURL != "" {
-			return cdnURL
-		}
-		return b.ImageURL
-	}
-
-	// Validate CDN URL if available
-	if cdnURL != "" && client.ValidateCDNImageURL(cdnURL, b.ID) {
-		return cdnURL
-	}
-
-	// Fallback to API-provided URL
-	if b.ImageURL != "" {
-		return b.ImageURL
-	}
-
-	// Last resort: return CDN URL even if validation failed
-	// (in case validation had network issues)
-	return cdnURL
-}
-
 // GetImageURLWithFallback returns the primary image URL and a fallback URL.
 // Primary: CDN PNG URL (constructed from element ID)
 // Fallback: API-provided imageUrl (may be JPG)

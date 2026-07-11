@@ -266,14 +266,6 @@ api_clients:
   # Pick-a-Brick API client configuration
   pickabrick:
 
-    # Validate CDN image URLs before returning them
-    # When enabled, the backend will check if the CDN PNG image exists using a HEAD request
-    # If the CDN image doesn't exist, it falls back to the API's imageUrl (usually JPG)
-    # Results are cached to avoid repeated validation attempts
-    # Recommended: true (ensures reliable image URLs for clients)
-    # Default value: true
-    validate_cdn_images: true
-
     # Random delay range between requests in milliseconds
     # Delay will be randomly selected between min and max for each request
     # Default values: min=100, max=300 (0.1-0.3 seconds between requests)

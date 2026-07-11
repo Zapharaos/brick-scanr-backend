@@ -18,11 +18,12 @@ type ID struct {
 
 // Core represents a Lego brick with only the core identifying information and general fields that are not specific.
 type Core struct {
-	IsCustom bool   `json:"is_custom"`
-	ID       *ID    `json:"id"`
-	IDs      []ID   `json:"ids"`
-	Name     string `json:"name"`
-	ImageURL string `json:"image_url"`
+	IsCustom         bool   `json:"is_custom"`
+	ID               *ID    `json:"id"`
+	IDs              []ID   `json:"ids"`
+	Name             string `json:"name"`
+	ImageURL         string `json:"image_url"`
+	FallbackImageURL string `json:"fallback_image_url,omitempty"`
 }
 
 // GetElementID returns the appropriate ElementID to use
