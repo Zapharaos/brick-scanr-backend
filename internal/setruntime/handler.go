@@ -2,7 +2,6 @@ package setruntime
 
 import (
 	"context"
-	"net/http"
 	"sync"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
@@ -32,9 +31,7 @@ func NewHandler(ctx context.Context) *Handler {
 		mutex:     sync.RWMutex{},
 		wg:        &sync.WaitGroup{},
 		Upgrader: &websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				return true
-			},
+			CheckOrigin: wsruntime.CheckOrigin,
 		},
 		ErrorLogger: supervisor.NewAsyncErrorLogger(ctx, 1000),
 	}

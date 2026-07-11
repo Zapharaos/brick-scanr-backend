@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/app"
 	"github.com/Zapharaos/brick-scanr-backend/internal/router"
@@ -79,7 +80,9 @@ func main() {
 		zap.L().Fatal("User forced shutdown")
 	}()
 
-	if err := srv.Shutdown(context.Background()); err != nil {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		zap.L().Fatal("Server shutdown failed", zap.Error(err))
 	}
 

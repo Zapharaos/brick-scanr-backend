@@ -135,11 +135,12 @@ cors:
   # Default value: true
   enabled: true
 
-  # Specify allowed origins for CORS
-  # Default value: ["https://*", "http://*"]
+  # Specify allowed origins for CORS (exact match, no wildcards).
+  # In dev, allow localhost only. Override in config.prod.yaml or via
+  # BRICK_SCANR_CORS_ALLOWED_ORIGINS env var in production.
   allowed_origins:
-    - "https://*"
-    - "http://*"
+    - "http://localhost:3000"
+    - "http://localhost:5173"
 
   # Specify allowed methods for CORS
   # Default value: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]

@@ -2,9 +2,9 @@ package searchruntime
 
 import (
 	"context"
-	"net/http"
 	"sync"
 
+	"github.com/Zapharaos/brick-scanr-backend/internal/wsruntime"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/viper"
@@ -30,7 +30,7 @@ func NewHandler(_ context.Context) *Handler {
 		byKey:    make(map[string]*Runtime),
 		wg:       &sync.WaitGroup{},
 		Upgrader: &websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: wsruntime.CheckOrigin,
 		},
 	}
 }
