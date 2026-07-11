@@ -37,11 +37,8 @@ type ElementCategory struct {
 }
 
 type ElementFacets struct {
-	Category    *ElementCategory `json:"category,omitempty"`
-	Subcategory *ElementCategory `json:"subcategory,omitempty"`
 	Color       *ElementCategory `json:"color,omitempty"`
 	ColorFamily *ElementCategory `json:"colorFamily,omitempty"`
-	System      string           `json:"system,omitempty"`
 }
 
 type Brick struct {
@@ -106,7 +103,7 @@ func (c *Client) FetchBricksByDesignID(designID string, locale language.Tag) ([]
 	)
 
 	// GraphQL query from the LEGO API
-	query := `query ElementByDesignId($collapseDesignId: String!, $filters: ElementFilters, $sku: String) {
+	query := `query ElementByDesignId($collapseDesignId: String!, $filters: ElementFilters) {
   elements(by: {collapseDesignId: $collapseDesignId}, filters: $filters) {
     ...ElementLeaf
     __typename
@@ -130,16 +127,7 @@ fragment ElementLeaf on SearchResultElement {
     formattedValue
     __typename
   }
-  quantityInSet(sku: $sku)
   facets {
-    category {
-      ...ElementFacetCategory
-      __typename
-    }
-    subcategory {
-      ...ElementFacetCategory
-      __typename
-    }
     color {
       ...ElementFacetCategory
       __typename
@@ -148,7 +136,6 @@ fragment ElementLeaf on SearchResultElement {
       ...ElementFacetCategory
       __typename
     }
-    system
     __typename
   }
   siblings {
@@ -258,66 +245,14 @@ func (c *Client) FetchBricksByBrickID(brickID string, locale language.Tag) ([]Br
 	)
 
 	// GraphQL query from the LEGO API
-	query := `query PickABrickQuery($input: ElementQueryInput!, $sku: String) {
+	query := `query PickABrickQuery($input: ElementQueryInput!) {
   searchElements(input: $input) {
     results {
       ...ElementLeaf
       __typename
     }
-    facets {
-      ...FacetData
-      __typename
-    }
-    set {
-      id
-      type
-      name
-      imageUrl
-      instructionsUrl
-      pieces
-      inStock
-      price {
-        formattedAmount
-        __typename
-      }
-      __typename
-    }
-    total
-    count
     __typename
   }
-}
-
-fragment FacetData on Facet {
-  id
-  key
-  name
-  labels {
-    count
-    key
-    name
-    children {
-      count
-      key
-      name
-      ... on FacetValue {
-        value
-        __typename
-      }
-      __typename
-    }
-    ... on FacetValue {
-      value
-      __typename
-    }
-    ... on FacetRange {
-      from
-      to
-      __typename
-    }
-    __typename
-  }
-  __typename
 }
 
 fragment ElementLeaf on SearchResultElement {
@@ -337,16 +272,7 @@ fragment ElementLeaf on SearchResultElement {
     formattedValue
     __typename
   }
-  quantityInSet(sku: $sku)
   facets {
-    category {
-      ...ElementFacetCategory
-      __typename
-    }
-    subcategory {
-      ...ElementFacetCategory
-      __typename
-    }
     color {
       ...ElementFacetCategory
       __typename
@@ -355,7 +281,6 @@ fragment ElementLeaf on SearchResultElement {
       ...ElementFacetCategory
       __typename
     }
-    system
     __typename
   }
   siblings {
