@@ -8,8 +8,17 @@ import (
 	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
 	"github.com/Zapharaos/brick-scanr-backend/internal/utils"
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 	"golang.org/x/text/language"
 )
+
+// pabFetchGroup deduplicates concurrent Pick-a-Brick API calls for the same (elementID, locale).
+var pabFetchGroup singleflight.Group
+
+type pabFetchResult struct {
+	bricks []pickabrick.Brick
+	err    error
+}
 
 // MapLocaleFromPickabrick maps a pickabrick.Brick to an internal Locale representation
 func MapLocaleFromPickabrick(brick Locale, pab pickabrick.Brick, tag language.Tag) Locale {
@@ -43,7 +52,13 @@ func MapLocaleFromPickabrick(brick Locale, pab pickabrick.Brick, tag language.Ta
 // - A boolean indicating whether a valid locale with price data was found
 // - A pointer to a Locale struct containing a potential locale if not found on pick-a-brick, or nil if not applicable
 func (l *Locale) Fetch(ctx context.Context, elementID ElementID, locale language.Tag) (bool, bool, *Locale) {
-	results, err := pickabrick.C().FetchBricksByBrickID(string(elementID), locale)
+	sfKey := string(elementID) + ":" + locale.String()
+	v, _, _ := pabFetchGroup.Do(sfKey, func() (interface{}, error) {
+		bricks, err := pickabrick.C().FetchBricksByBrickID(string(elementID), locale)
+		return pabFetchResult{bricks: bricks, err: err}, nil
+	})
+	res := v.(pabFetchResult)
+	results, err := res.bricks, res.err
 	if err != nil {
 		// Check if it's a not-found error
 		if !errors.Is(err, pickabrick.ErrBrickNotFound) {

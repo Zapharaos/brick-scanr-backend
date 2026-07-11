@@ -117,7 +117,7 @@ func RedisSetSetIDForSlug(ctx context.Context, set Locale, updateTTL bool) error
 // Uses distributed locking when key doesn't exist to ensure consistency during concurrent writes
 func RedisGetSetIDBySlug(ctx context.Context, slug string) (uuid.UUID, error) {
 	key := RedisBuildKeySlug(slug)
-	data, err := redis.Get(ctx, key, true) // Use lock on cache miss
+	data, err := redis.Get(ctx, key)
 	if err != nil {
 		zap.L().Error(
 			"failed to fetch data from redis",

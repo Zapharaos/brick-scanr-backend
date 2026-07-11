@@ -21,7 +21,7 @@ func RedisBuildKeyDesign(designID DesignID, tag language.Tag) string {
 // RedisGetDesign retrieves a Brick from Redis by its ElementID and tag
 func RedisGetDesign(ctx context.Context, designID DesignID, tag language.Tag) (Design, error) {
 	key := RedisBuildKeyDesign(designID, tag)
-	data, err := redis.Get(ctx, key, true)
+	data, err := redis.Get(ctx, key)
 	if err != nil && !errors.Is(err, redis.ErrKeyNotFound) {
 		zap.L().Error(
 			"failed to fetch design data from redis",

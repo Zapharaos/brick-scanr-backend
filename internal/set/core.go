@@ -59,7 +59,7 @@ func RedisBuildKeyCore(identifier uuid.UUID) string {
 // RedisGetCore retrieves a Set from Redis by its UUID
 func RedisGetCore(ctx context.Context, setID uuid.UUID) (Core, error) {
 	key := RedisBuildKeyCore(setID)
-	data, err := redis.Get(ctx, key, true)
+	data, err := redis.Get(ctx, key)
 	if err != nil {
 		zap.L().Error(
 			"failed to fetch data from redis",

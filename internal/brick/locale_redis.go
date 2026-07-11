@@ -21,7 +21,7 @@ func RedisBuildKeyLocale(elementID ElementID, tag language.Tag) string {
 // RedisGetLocale retrieves a Brick from Redis by its ElementID and tag
 func RedisGetLocale(ctx context.Context, elementID ElementID, tag language.Tag) (Locale, error) {
 	key := RedisBuildKeyLocale(elementID, tag)
-	data, err := redis.Get(ctx, key, true)
+	data, err := redis.Get(ctx, key)
 	if err != nil && !errors.Is(err, redis.ErrKeyNotFound) {
 		zap.L().Error(
 			"failed to fetch brick data from redis",

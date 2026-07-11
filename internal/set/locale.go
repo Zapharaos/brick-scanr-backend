@@ -141,7 +141,7 @@ func RedisGetLocale(ctx context.Context, setID uuid.UUID, tag language.Tag, with
 	}
 
 	key := RedisBuildKeyLocale(setID, tag)
-	data, err := redis.Get(ctx, key, true)
+	data, err := redis.Get(ctx, key)
 	if err != nil {
 		zap.L().Error(
 			"failed to fetch data from redis",
@@ -243,7 +243,7 @@ func RedisGetLocaleByBricklinkID(ctx context.Context, bricklinkID string, tag la
 	bricklinkKey := RedisBuildKeyBricklinkIDToSetID(bricklinkID)
 
 	// First, get the setID from bricklinkID
-	setIDStr, err := redis.Get(ctx, bricklinkKey, true)
+	setIDStr, err := redis.Get(ctx, bricklinkKey)
 	if err != nil {
 		return Locale{}, redis.KeyNotFound, err
 	}

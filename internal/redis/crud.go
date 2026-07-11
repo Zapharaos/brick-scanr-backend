@@ -12,45 +12,14 @@ import (
 )
 
 // Get retrieves a value from Redis by key
-// If useLock is true, acquires a distributed lock when key is not found to ensure consistency during concurrent writes
-func Get(ctx context.Context, key string, useLock bool) (string, error) {
+func Get(ctx context.Context, key string) (string, error) {
 	value, err := database.DB().Redis().Client.Get(ctx, key).Result()
-
-	if err != nil && errors.Is(err, goredis.Nil) {
-		// Key not found
-		if !useLock {
+	if err != nil {
+		if errors.Is(err, goredis.Nil) {
 			return "", ErrKeyNotFound
 		}
-
-		// Acquire lock to prevent race with concurrent write
-		lockKey := BuildLockKey(key)
-		mutex, lockErr := AcquireRedisLock(ctx, lockKey)
-		if lockErr != nil {
-			zap.L().Error(
-				"failed to acquire lock for redis key read",
-				zap.String("key", key),
-				zap.Error(lockErr),
-			)
-			return "", lockErr
-		}
-		defer ReleaseRedisLock(ctx, mutex, lockKey)
-
-		// Double-check after acquiring lock
-		value, err = database.DB().Redis().Client.Get(ctx, key).Result()
-		if err != nil {
-			if errors.Is(err, goredis.Nil) {
-				return "", ErrKeyNotFound
-			}
-			return "", fmt.Errorf("%w: %v", ErrFailedToGetKey, err)
-		}
-
-		return value, nil
-	} else if err != nil {
-		// Other Redis error
 		return "", fmt.Errorf("%w: %v", ErrFailedToGetKey, err)
 	}
-
-	// Key exists, return its value
 	return value, nil
 }
 
