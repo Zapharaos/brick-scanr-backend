@@ -48,6 +48,9 @@ type RuntimeSet struct {
 	bricks   BricksHandler
 	ihAccess InventoryAccess
 
+	// ETA estimation for the current fetch phase (accessed only from run())
+	throughput throughputTracker
+
 	// Client management
 	*clientHolder
 	register   chan Client

@@ -14,6 +14,11 @@ import (
 // a couple of seconds of display latency is imperceptible for blocks that last 30s+.
 const throttleMonitorInterval = 2 * time.Second
 
+// resumeDriftThreshold is the minimum change in the resume time (epoch ms) that
+// triggers a re-emit while the state is unchanged, so the client countdown keeps
+// updating during a pause/block without spamming a packet on every tick.
+const resumeDriftThreshold = 1000
+
 // aggregateThrottleState returns the most severe throttle state across the API
 // clients involved in a set fetch (BrickLink for inventory, LEGO for details,
 // Pick-a-Brick for prices), along with the latest resume time when blocked.
@@ -26,14 +31,28 @@ func aggregateThrottleState() (throttle.State, int64) {
 	}
 
 	worst := throttle.StateNormal
-	var resumeAt int64
 	for _, s := range statuses {
-		state := s.SimpleState(now)
-		if state.MoreSevereThan(worst) {
+		if state := s.SimpleState(now); state.MoreSevereThan(worst) {
 			worst = state
 		}
-		if state == throttle.StateBlocked && s.ThrottleEndsAt.After(now) {
-			if ms := s.ThrottleEndsAt.UnixMilli(); ms > resumeAt {
+	}
+
+	// Capture the latest resume time among the clients that are in the worst state,
+	// reading the field that matches it (block end for blocked, pause end for paused).
+	var resumeAt int64
+	for _, s := range statuses {
+		if s.SimpleState(now) != worst {
+			continue
+		}
+		var end time.Time
+		switch worst {
+		case throttle.StateBlocked:
+			end = s.ThrottleEndsAt
+		case throttle.StatePaused:
+			end = s.PausedUntil
+		}
+		if end.After(now) {
+			if ms := end.UnixMilli(); ms > resumeAt {
 				resumeAt = ms
 			}
 		}
@@ -50,6 +69,7 @@ func (h *Handler) monitorThrottle(rs *RuntimeSet, stop <-chan struct{}) {
 	defer ticker.Stop()
 
 	last := throttle.StateNormal
+	var lastResumeAt int64
 	for {
 		select {
 		case <-stop:
@@ -59,11 +79,28 @@ func (h *Handler) monitorThrottle(rs *RuntimeSet, stop <-chan struct{}) {
 			return
 		case <-ticker.C:
 			state, resumeAt := aggregateThrottleState()
-			if state == last {
+
+			// Re-emit on a state change, or — while the state is unchanged but
+			// carries a countdown — when the resume time drifts enough to keep the
+			// client countdown accurate (e.g. a sustained pause whose next-slot
+			// estimate keeps sliding forward).
+			changed := state != last
+			drifted := resumeAt > 0 && absInt64(resumeAt-lastResumeAt) >= resumeDriftThreshold
+			if !changed && !drifted {
 				continue
 			}
+
 			last = state
+			lastResumeAt = resumeAt
 			h.PushThrottleStatus(rs.ID, state, resumeAt)
 		}
 	}
+}
+
+// absInt64 returns the absolute value of an int64.
+func absInt64(v int64) int64 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }

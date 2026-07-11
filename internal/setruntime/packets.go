@@ -131,10 +131,14 @@ type PacketInventoryBatch struct {
 	Bricks         []set.Brick         `json:"bricks"`
 	BricksProgress *wsruntime.Progress `json:"bricksProgress"`
 	Status         BatchStatus         `json:"status"`
+	// EtaSeconds is the estimated remaining time for the current phase, based on
+	// the processing rate over the last 30s. Omitted when it cannot be estimated
+	// (0 = unknown), e.g. too little history or a stall due to upstream throttling.
+	EtaSeconds int `json:"etaSeconds,omitempty"`
 }
 
 // NewPacketInventoryBatch creates a new PacketInventoryBatch
-func NewPacketInventoryBatch(bricks []set.Brick, progress *wsruntime.Progress, status BatchStatus) *PacketInventoryBatch {
+func NewPacketInventoryBatch(bricks []set.Brick, progress *wsruntime.Progress, status BatchStatus, etaSeconds int) *PacketInventoryBatch {
 	return &PacketInventoryBatch{
 		packet: packet{
 			Type: PacketTypeInventoryBatch,
@@ -142,6 +146,7 @@ func NewPacketInventoryBatch(bricks []set.Brick, progress *wsruntime.Progress, s
 		Bricks:         bricks,
 		BricksProgress: progress,
 		Status:         status,
+		EtaSeconds:     etaSeconds,
 	}
 }
 
@@ -159,10 +164,11 @@ func (p *PacketInventoryBatch) ToJSON() ([]byte, error) {
 // looking broken.
 type PacketThrottleStatus struct {
 	packet
-	// State is the current throttle state: normal / slowed / blocked.
+	// State is the current throttle state: normal / slowed / paused / blocked.
 	State throttle.State `json:"state"`
-	// ResumeAt is the epoch milliseconds at which the block is expected to end.
-	// Only meaningful when State is "blocked"; omitted otherwise.
+	// ResumeAt is the epoch milliseconds at which the wait is expected to end.
+	// Meaningful when State is "blocked" (server block) or "paused" (our own
+	// sliding-window pause); omitted otherwise.
 	ResumeAt int64 `json:"resumeAt,omitempty"`
 }
 

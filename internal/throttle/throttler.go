@@ -28,8 +28,8 @@ type Config struct {
 	BackoffMultiplier float64
 
 	// User agent
-	UserAgentEnabled  bool     // Whether to set a User-Agent header on requests at all
-	UserAgentRotation bool     // Whether to rotate through UserAgents; if false a single stable UA is used
+	UserAgentEnabled  bool // Whether to set a User-Agent header on requests at all
+	UserAgentRotation bool // Whether to rotate through UserAgents; if false a single stable UA is used
 	UserAgents        []string
 
 	// Adaptive throttling thresholds
@@ -44,13 +44,27 @@ type State string
 const (
 	StateNormal  State = "normal"  // Operating normally
 	StateSlowed  State = "slowed"  // Server is stressed, requests are being slowed down
+	StatePaused  State = "paused"  // Self-imposed pause: our sliding window is saturated, waiting until PausedUntil
 	StateBlocked State = "blocked" // Blocked by the server (429), waiting until ThrottleEndsAt
 )
+
+// pauseThreshold is how long the sliding window must stay saturated before we
+// surface a "paused" state to the client. It keeps sub-second waits (the common
+// case) from flickering the banner on and off.
+const pauseThreshold = 1 * time.Second
+
+// saturationGap is the grace period used to stitch consecutive saturated waits
+// into a single pause episode. Under concurrency a slot briefly frees between
+// requests; without this grace the episode start would keep resetting and never
+// reach pauseThreshold.
+const saturationGap = 500 * time.Millisecond
 
 // severity ranks states so they can be compared/aggregated (higher = worse).
 func (s State) severity() int {
 	switch s {
 	case StateBlocked:
+		return 3
+	case StatePaused:
 		return 2
 	case StateSlowed:
 		return 1
@@ -69,6 +83,9 @@ func (s Status) SimpleState(now time.Time) State {
 	if s.IsBlocked && s.ThrottleEndsAt.After(now) {
 		return StateBlocked
 	}
+	if s.IsPaused && s.PausedUntil.After(now) {
+		return StatePaused
+	}
 	if s.IsSlowTraffic || s.AdaptationLevel >= 2 {
 		return StateSlowed
 	}
@@ -79,6 +96,8 @@ func (s Status) SimpleState(now time.Time) State {
 type Status struct {
 	IsBlocked            bool          // Currently blocked by server (429 or rate limit error)
 	IsSlowTraffic        bool          // Traffic is slower than normal (server stressed)
+	IsPaused             bool          // Sliding window saturated: requests are being self-paused
+	PausedUntil          time.Time     // Estimated time the current self-imposed pause ends
 	ThrottleEndsAt       time.Time     // When current throttle period ends
 	AvgResponseTime      time.Duration // Recent average response time
 	BaselineResponseTime time.Duration // Expected baseline response time
@@ -102,6 +121,11 @@ type Throttler struct {
 	status          Status
 	blockedUntil    time.Time // When the block expires
 	adaptiveDelayMs int       // Additional delay due to adaptation (added to base delay)
+
+	// Sliding-window saturation tracking (self-imposed pause)
+	saturatedSince  time.Time // Start of the current saturation episode
+	lastSaturatedAt time.Time // Last time a request was parked due to saturation
+	pausedUntil     time.Time // Estimated time a slot frees (oldest request + window)
 }
 
 // New creates a new Throttler instance
@@ -131,11 +155,35 @@ func (t *Throttler) GetStatus() Status {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	now := time.Now()
+
 	// Update ThrottleEndsAt if we're currently blocked
-	if !t.blockedUntil.IsZero() && time.Now().Before(t.blockedUntil) {
+	if !t.blockedUntil.IsZero() && now.Before(t.blockedUntil) {
 		t.status.ThrottleEndsAt = t.blockedUntil
 	} else {
 		t.status.ThrottleEndsAt = time.Time{}
+	}
+
+	// Derive the self-imposed "paused" state from the sliding-window saturation.
+	//
+	// A pause is "ongoing" while the projected resume time is still ahead — which
+	// covers a single long park (the goroutine sleeps in one shot and never
+	// refreshes lastSaturatedAt) — OR while a request was parked very recently,
+	// which covers a burst of short back-to-back parks whose pausedUntil is only
+	// a few ms ahead and lapses between parks. Either way the state clears on its
+	// own once load subsides.
+	//
+	// Anti-flicker: only surface once the projected episode length (start → resume)
+	// reaches pauseThreshold, so sub-second waits don't toggle the banner.
+	ongoing := t.pausedUntil.After(now) ||
+		(!t.lastSaturatedAt.IsZero() && now.Sub(t.lastSaturatedAt) <= saturationGap)
+	longEnough := t.pausedUntil.Sub(t.saturatedSince) >= pauseThreshold
+	if !t.saturatedSince.IsZero() && ongoing && longEnough {
+		t.status.IsPaused = true
+		t.status.PausedUntil = t.pausedUntil
+	} else {
+		t.status.IsPaused = false
+		t.status.PausedUntil = time.Time{}
 	}
 
 	return t.status

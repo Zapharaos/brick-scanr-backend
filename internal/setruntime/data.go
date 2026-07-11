@@ -5,6 +5,7 @@ import (
 	"github.com/Zapharaos/brick-scanr-backend/internal/throttle"
 	"github.com/Zapharaos/brick-scanr-backend/internal/wsruntime"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 type DataType uint8
@@ -114,8 +115,11 @@ func (rs *RuntimeSet) handleDataChangeProgress(change dataChange) {
 			status = BatchStatusPickabrickPrices
 		}
 
+		// Estimate the remaining time for this phase from the observed rate
+		eta := rs.throughput.record(change.Type, change.Progress.Done, change.Progress.Total)
+
 		// Create and broadcast the inventory batch packet
-		inventoryBatchPacket := NewPacketInventoryBatch(bricks, &change.Progress, status)
+		inventoryBatchPacket := NewPacketInventoryBatch(bricks, &change.Progress, status, eta)
 		rs.broadcastPacket(inventoryBatchPacket)
 
 	default:
@@ -127,5 +131,11 @@ func (rs *RuntimeSet) handleDataChangeProgress(change dataChange) {
 // handleDataChangeThrottle broadcasts the current upstream throttle state so the
 // frontend can explain a stalled progress bar instead of appearing broken.
 func (rs *RuntimeSet) handleDataChangeThrottle(change dataChange) {
+	zap.L().Debug("Broadcasting throttle status packet",
+		zap.String("runtime_id", rs.ID.String()),
+		zap.String("state", string(change.ThrottleState)),
+		zap.Int64("resume_at", change.ThrottleResumeAt),
+		zap.Int("clients", len(rs.clients)),
+	)
 	rs.broadcastPacket(NewPacketThrottleStatus(change.ThrottleState, change.ThrottleResumeAt))
 }

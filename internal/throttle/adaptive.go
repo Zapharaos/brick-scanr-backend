@@ -6,6 +6,12 @@ import (
 	"go.uber.org/zap"
 )
 
+// adaptationCooldown is how long the throttler stays at an elevated adaptation
+// level without any re-escalation before easing off one level. It lets us
+// recover from a transient slowdown even while the rolling average is still
+// high (e.g. slow samples not yet flushed, or traffic gone quiet).
+const adaptationCooldown = 20 * time.Second
+
 // recordResponseTime records a successful response time and triggers adaptation if needed
 func (t *Throttler) recordResponseTime(responseTime time.Duration) {
 	t.mu.Lock()
@@ -80,6 +86,17 @@ func (t *Throttler) adaptToResponseTime() {
 			newLevel = 0
 			newAdaptiveDelay = 0
 		}
+	}
+
+	// Time-based decay: when the measurement alone wouldn't push the level up
+	// (newLevel <= current) and no adaptation has happened for adaptationCooldown,
+	// ease off one level so we recover from sticky slowdowns instead of staying
+	// pinned at the top until ~20 fast samples flush the rolling average.
+	if newLevel <= t.status.AdaptationLevel && t.status.AdaptationLevel > 0 &&
+		time.Since(t.status.LastAdaptationTime) > adaptationCooldown {
+		newLevel = t.status.AdaptationLevel - 1
+		newAdaptiveDelay = t.adaptiveDelayMs / 2
+		isSlowTraffic = newLevel > 0
 	}
 
 	// Only update if there's a change

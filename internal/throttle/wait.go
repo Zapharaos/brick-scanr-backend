@@ -117,6 +117,15 @@ func (t *Throttler) Wait(ctx context.Context) error {
 			break
 		}
 
+		// Track sliding-window saturation so GetStatus can surface a "paused" state.
+		// Consecutive parks within saturationGap are stitched into one episode; a
+		// longer gap starts a fresh one.
+		if now.Sub(t.lastSaturatedAt) > saturationGap {
+			t.saturatedSince = now
+		}
+		t.lastSaturatedAt = now
+		t.pausedUntil = waitUntil
+
 		zap.L().Debug("Throttler: throttling - max requests reached",
 			zap.String("client", t.name),
 			zap.Int("max_requests", t.config.MaxRequests),
