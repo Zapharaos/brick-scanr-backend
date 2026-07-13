@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
 	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
 	"github.com/Zapharaos/brick-scanr-backend/internal/rebrickable"
 	"go.uber.org/zap"
@@ -63,19 +64,32 @@ func (d *Design) FetchMinimal(ctx context.Context, locale language.Tag) error {
 		return err
 	}
 
+	// Design IDs originate from the BrickLink catalog, whose image URL is
+	// predictable: it covers parts that Rebrickable doesn't know or has no image for.
+	bricklinkImageURL := bricklink.PartImageURL(string(d.ID.DesignID))
+
 	// The part was not found on Rebrickable
 	if errors.Is(err, rebrickable.ErrPartNotFound) {
-		// Keep the design as-is; FetchBricks may still resolve it through Pick-a-Brick
+		// Keep the design as-is; FetchBricks may still resolve it through Pick-a-Brick.
+		// Still expose an image so search results aren't blank.
+		if d.Core.ImageURL == "" {
+			d.Core.ImageURL = bricklinkImageURL
+		}
 
 	} else {
 
 		// Part was found, populate the design details
 		id := ID{DesignID: d.ID.DesignID}
 		core := Core{
-			ID:       &id,
-			IDs:      []ID{id},
-			Name:     part.Name,
-			ImageURL: part.PartImgURL,
+			ID:               &id,
+			IDs:              []ID{id},
+			Name:             part.Name,
+			ImageURL:         part.PartImgURL,
+			FallbackImageURL: bricklinkImageURL,
+		}
+		if core.ImageURL == "" {
+			core.ImageURL = bricklinkImageURL
+			core.FallbackImageURL = ""
 		}
 		// Molds are physical variations of the same part: the closest equivalent to
 		// the alternate item numbers previously scraped from BrickLink.
