@@ -47,6 +47,32 @@ func RedisGetLocale(ctx context.Context, elementID ElementID, tag language.Tag) 
 	return brick, nil
 }
 
+// RedisSetLocaleForElement stores a Brick in Redis under an explicit element ID,
+// regardless of the brick's own main ID. Used to alias a resolved sibling element's
+// data under the inventory's original element ID, so future lookups on the original
+// ID find the purchasable sibling instead of a cached not-found.
+func RedisSetLocaleForElement(ctx context.Context, elementID ElementID, brick Locale, tag language.Tag, updateTTL bool) error {
+	brickJSON, err := json.Marshal(brick)
+	if err != nil {
+		zap.L().Error("failed to marshal brick to JSON",
+			zap.Error(err),
+			zap.String("elementID", string(elementID)),
+		)
+		return err
+	}
+
+	key := RedisBuildKeyLocale(elementID, tag)
+
+	var ttl time.Duration
+	if updateTTL {
+		ttl = database.DB().Redis().TTLS.Brick
+	} else {
+		ttl = redis.KeepTTL
+	}
+
+	return redis.Set(ctx, key, brickJSON, ttl, true)
+}
+
 // RedisSetLocale stores a Brick in Redis by its ElementID and tag
 func RedisSetLocale(ctx context.Context, brick Locale, tag language.Tag, updateTTL bool) error {
 	id, err := brick.GetElementID()

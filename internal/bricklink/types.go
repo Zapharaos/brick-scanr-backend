@@ -1,7 +1,5 @@
 package bricklink
 
-import "time"
-
 // SearchItem represents a single item from BrickLink search results
 type SearchItem struct {
 	IDItem          int     `json:"idItem"`
@@ -22,64 +20,6 @@ type SearchItem struct {
 	MUsedMaxPrice   string  `json:"mUsedMaxPrice"`
 	StrCategory     string  `json:"strCategory"`
 	StrPCC          *string `json:"strPCC"`
-}
-
-// InventoryItem represents a single item from the BrickLink inventory
-type InventoryItem struct {
-	Index       int      `json:"index"`
-	ItemIDs     []string `json:"item_ids"`
-	ItemNo      string   `json:"item_no"`
-	Quantity    string   `json:"quantity"`
-	Description string   `json:"description"`
-	ImageURL    string   `json:"image_url"`
-}
-
-// HasUniqueItemID checks if the inventory item has exactly one associated Item ID
-func (ii *InventoryItem) HasUniqueItemID() bool {
-	return len(ii.ItemIDs) == 1
-}
-
-type CustomItemPrefixes string
-
-const (
-	CustomItemPrefixGen  CustomItemPrefixes = "gen"
-	CustomItemPrefixIdea CustomItemPrefixes = "idea"
-)
-
-func (ii *InventoryItem) IsCustom() bool {
-	// Check if ItemNo starts with any of the custom prefixes
-
-	// Check "gen" prefix (3 characters)
-	if len(ii.ItemNo) >= len(CustomItemPrefixGen) {
-		if ii.ItemNo[:len(CustomItemPrefixGen)] == string(CustomItemPrefixGen) {
-			return true
-		}
-	}
-
-	// Check "idea" prefix (4 characters)
-	if len(ii.ItemNo) >= len(CustomItemPrefixIdea) {
-		if ii.ItemNo[:len(CustomItemPrefixIdea)] == string(CustomItemPrefixIdea) {
-			return true
-		}
-	}
-
-	// Check if item has no valid Element IDs (e.g., "Part Color Code Missing")
-	// Items without Element IDs are considered custom/unavailable
-	if len(ii.ItemIDs) == 0 {
-		return true
-	}
-
-	return false
-}
-
-// Inventory represents the complete inventory for a set
-type Inventory struct {
-	SetNumber        string          `json:"set_number"`
-	RegularItems     []InventoryItem `json:"regular_items"`
-	ExtraItems       []InventoryItem `json:"extra_items"`
-	AlternateItems   []InventoryItem `json:"alternate_items"`
-	CounterpartItems []InventoryItem `json:"counterpart_items"`
-	FetchedAt        time.Time       `json:"fetched_at"`
 }
 
 type searchTypeList struct {

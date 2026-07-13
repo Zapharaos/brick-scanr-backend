@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
 	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
+	"github.com/Zapharaos/brick-scanr-backend/internal/rebrickable"
 	"go.uber.org/zap"
 	"golang.org/x/text/language"
 )
@@ -46,31 +46,46 @@ func (d *Design) Fetch(ctx context.Context, locale language.Tag) ([]Locale, erro
 	return d.FetchBricks(ctx, locale)
 }
 
-// FetchMinimal fetches the minimal design details (name, image, etc.) for the given design ID and locale from BrickLink.
+// FetchMinimal fetches the minimal design details (name, image, alternate molds) for
+// the given design ID from Rebrickable. Design IDs are Rebrickable part numbers since
+// the inventory source moved to Rebrickable, so its part endpoint is the authoritative
+// (and structured) source — the previous BrickLink HTML scraping is gone.
+// The locale parameter is kept for signature stability; Rebrickable names are English,
+// localized display data comes from Pick-a-Brick via FetchBricks.
 func (d *Design) FetchMinimal(ctx context.Context, locale language.Tag) error {
-	// Query BrickLink for brick details
-	bricklinkBrick, err := bricklink.C().FetchBrickDetails(string(d.ID.DesignID), locale)
-	if err != nil && !errors.Is(err, bricklink.ErrBrickNotFound) {
-		zap.L().Error("Failed to fetch brick details from BrickLink",
+	// Query Rebrickable for part details
+	part, err := rebrickable.C().FetchPartDetails(string(d.ID.DesignID))
+	if err != nil && !errors.Is(err, rebrickable.ErrPartNotFound) {
+		zap.L().Error("Failed to fetch part details from Rebrickable",
 			zap.Error(err),
 			zap.String("design_id", string(d.ID.DesignID)),
 		)
 		return err
 	}
 
-	// The brick was not found on bricklink
-	if errors.Is(err, bricklink.ErrBrickNotFound) {
-		// Mark design as not found and cache that result to prevent future lookups
-		//d.DesignStatus = DesignStatusBricksNotFound
+	// The part was not found on Rebrickable
+	if errors.Is(err, rebrickable.ErrPartNotFound) {
+		// Keep the design as-is; FetchBricks may still resolve it through Pick-a-Brick
 
 	} else {
 
-		// Brick was found, populate the design details
+		// Part was found, populate the design details
+		id := ID{DesignID: d.ID.DesignID}
+		core := Core{
+			ID:       &id,
+			IDs:      []ID{id},
+			Name:     part.Name,
+			ImageURL: part.PartImgURL,
+		}
+		// Molds are physical variations of the same part: the closest equivalent to
+		// the alternate item numbers previously scraped from BrickLink.
+		for _, mold := range part.Molds {
+			if mold != "" && mold != string(d.ID.DesignID) {
+				core.IDs = append(core.IDs, ID{DesignID: DesignID(mold)})
+			}
+		}
 
-		// Map BrickLink brick details to internal representation
-		bCore := NewCoreFromBricklinkBrick(bricklinkBrick)
-
-		d.Core = bCore
+		d.Core = core
 		d.DesignStatus = DesignStatusMinimal
 	}
 

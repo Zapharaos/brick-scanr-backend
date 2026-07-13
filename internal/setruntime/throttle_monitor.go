@@ -3,9 +3,9 @@ package setruntime
 import (
 	"time"
 
-	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
 	"github.com/Zapharaos/brick-scanr-backend/internal/lego"
 	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
+	"github.com/Zapharaos/brick-scanr-backend/internal/rebrickable"
 	"github.com/Zapharaos/brick-scanr-backend/internal/throttle"
 )
 
@@ -20,12 +20,12 @@ const throttleMonitorInterval = 2 * time.Second
 const resumeDriftThreshold = 1000
 
 // aggregateThrottleState returns the most severe throttle state across the API
-// clients involved in a set fetch (BrickLink for inventory, LEGO for details,
+// clients involved in a set fetch (Rebrickable for inventory, LEGO for details,
 // Pick-a-Brick for prices), along with the latest resume time when blocked.
 func aggregateThrottleState() (throttle.State, int64) {
 	now := time.Now()
 	statuses := []throttle.Status{
-		bricklink.C().ThrottlerStatus(),
+		rebrickable.C().ThrottlerStatus(),
 		lego.C().ThrottlerStatus(),
 		pickabrick.C().ThrottlerStatus(),
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/Zapharaos/brick-scanr-backend/internal/database"
 	"github.com/Zapharaos/brick-scanr-backend/internal/lego"
 	"github.com/Zapharaos/brick-scanr-backend/internal/pickabrick"
+	"github.com/Zapharaos/brick-scanr-backend/internal/rebrickable"
 	"github.com/Zapharaos/brick-scanr-backend/internal/utils"
 	"github.com/Zapharaos/go-spit"
 	"github.com/Zapharaos/lingo"
@@ -48,6 +49,14 @@ func initApiClients() {
 	bricklink.ReplaceGlobalClient(bricklink.NewClient())
 	pickabrick.ReplaceGlobalClient(pickabrick.NewClient())
 	lego.ReplaceGlobalClient(lego.NewClient())
+	rebrickable.ReplaceGlobalClient(rebrickable.NewClient())
+
+	// Rebrickable is the source of set inventories; without an API key every set
+	// fetch fails. Surface a misconfiguration at startup rather than at first fetch.
+	if !rebrickable.C().HasAPIKey() {
+		zap.L().Warn("Rebrickable API key is not configured; set inventory fetches will fail. " +
+			"Set BRICK_SCANR_API_CLIENTS_REBRICKABLE_API_KEY.")
+	}
 }
 
 func initTranslations() {

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/Zapharaos/brick-scanr-backend/internal/brick"
-	"github.com/Zapharaos/brick-scanr-backend/internal/bricklink"
+	"github.com/Zapharaos/brick-scanr-backend/internal/rebrickable"
 	"github.com/Zapharaos/brick-scanr-backend/internal/set"
 	"github.com/Zapharaos/brick-scanr-backend/internal/workerpool"
 	"github.com/Zapharaos/brick-scanr-backend/internal/wsruntime"
@@ -219,25 +219,25 @@ func (h *Handler) fetchSetDetails(ctx context.Context, rs *RuntimeSet, locale la
 	// Error not fatal and already handled in FetchLegoProductDetails
 }
 
-// fetchInventory fetches the inventory for a set from BrickLink using a worker pool
+// fetchInventory fetches the inventory for a set from Rebrickable using a worker pool
 func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag language.Tag) (bool, error) {
 
 	// Mark inventory as fetching to update clients and avoid any potential concurrent fetches
 	rs.set.SetInventoryStatus(set.FetchStatusFetching)
 	rs.cacheSet(ctx, false)
 
-	// Fetch inventory from BrickLink
-	inventory, err := bricklink.C().FetchInventory(rs.Read().BricklinkID, rs.Read().BricklinkNumber, tag)
+	// Fetch inventory from Rebrickable (structured JSON, includes LEGO element IDs).
+	inventory, err := rebrickable.C().FetchInventory(rs.Read().BricklinkNumber)
 	if err != nil {
 		// Check if it's a not-found error
-		if errors.Is(err, bricklink.ErrInventoryNotFound) {
+		if errors.Is(err, rebrickable.ErrInventoryNotFound) {
 			rs.set.SetInventoryStatus(set.FetchStatusCompleted)
 			rs.cacheSet(ctx, false)
 			return false, nil
 		}
 
 		// Failed to fetch inventory => FATAL
-		handleFatalError(h, rs, set.FetchErrorFetchInventory, DataTypeBricklinkBricks, err, "Failed to fetch inventory from BrickLink")
+		handleFatalError(h, rs, set.FetchErrorFetchInventory, DataTypeBricklinkBricks, err, "Failed to fetch inventory from Rebrickable")
 		return false, err
 	}
 
@@ -262,9 +262,9 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 	)
 
 	// Worker function: process a single inventory item
-	workerFunc := func(ctx context.Context, item bricklink.InventoryItem) (set.Brick, error) {
-		// Map BrickLink inventory item to local Brick representation
-		bCore, bInventory := brick.MapNewFromBricklinkInventoryItem(item)
+	workerFunc := func(ctx context.Context, item rebrickable.InventoryItem) (set.Brick, error) {
+		// Map Rebrickable inventory item to local Brick representation
+		bCore, bInventory := brick.MapNewFromRebrickableInventoryItem(item)
 
 		// Init brick
 		bSet := set.NewBrick(bInventory, brick.Locale{
@@ -358,7 +358,17 @@ func (h *Handler) fetchInventory(ctx context.Context, rs *RuntimeSet, tag langua
 	return true, nil
 }
 
-// fetchBricks fetches prices for all Bricks in a set from Pick-a-Brick using a worker pool
+// designJob groups the missing bricks that share a Pick-a-Brick design, so the
+// design's elements (all colors) can be fetched in a single request before resolving
+// each brick of the group. Bricks without a design ID get their own job (designID "").
+type designJob struct {
+	designID brick.DesignID
+	bricks   []set.Brick
+}
+
+// fetchBricks fetches prices for all Bricks in a set from Pick-a-Brick using a worker
+// pool whose unit of work is a design (not a brick): one request per unique design
+// covers every color, and progress is pushed to clients as each design group resolves.
 func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, locale language.Tag) error {
 	// Calculate total bricks
 	bricksSize := len(rs.bricks.missing)
@@ -367,34 +377,45 @@ func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, locale langua
 	}
 	totalSize := bricksSize + len(rs.bricks.final)
 
-	// Create optimal config based on brick count
-	config := workerpool.NewConfigOptimal(totalSize, len(h.sets))
+	// Group the missing bricks by design so each unique design is fetched once
+	jobs := groupBricksByDesign(rs.bricks.getMissingAsSlice())
 
-	// Create shared progress tracker
+	// Create optimal config based on job (design) count
+	config := workerpool.NewConfigOptimal(len(jobs), len(h.sets))
+
+	// Create shared progress tracker (tracks bricks, not jobs)
 	bprogress := wsruntime.NewProgress(totalSize, config.BatchSize)
 	bprogress.Done = len(rs.bricks.final) // Start progress with already completed bricks
 
+	// Announce the price phase immediately with an empty batch so clients switch
+	// stage right away, instead of perceiving the first design fetches as a stalled
+	// inventory step.
+	h.PushBatchProgress(rs.ID, DataTypePickabrickBricks, *bprogress)
+
 	zap.L().Debug("Starting worker pool for price fetching",
 		zap.Int("bricks_size", bricksSize),
+		zap.Int("design_jobs", len(jobs)),
 		zap.Int("workers", config.Workers),
 		zap.Int("batch_size", config.BatchSize),
 	)
 
-	// Warm the Pick-a-Brick cache by fetching prices grouped by design ID.
-	// Each design fetch returns every element (all colors) in a single request, so
-	// the per-brick worker below resolves from cache instead of issuing one
-	// Pick-a-Brick request per element.
-	h.prefetchDesignPrices(ctx, rs, locale)
-
-	// Worker function: fetch prices for a single design ID
-	workerFunc := func(ctx context.Context, brick set.Brick) (set.Brick, error) {
-		return h.workerHandlerBrickPrice(ctx, brick, locale)
+	// Worker function: resolve all bricks sharing one design
+	workerFunc := func(ctx context.Context, job designJob) ([]set.Brick, error) {
+		return h.workerHandlerDesignPrices(ctx, job, locale)
 	}
 
-	// Batch handler: send batch to frontend
+	// Batch handler: flatten the per-design results and send to frontend
 	// Note: This is called from a single collector goroutine, so no mutex needed
-	batchHandler := func(batch []set.Brick) error {
-		return h.batchHandlerBricksProgress(rs, batch, bprogress, DataTypePickabrickBricks, true)
+	batchHandler := func(batch [][]set.Brick) error {
+		size := 0
+		for _, group := range batch {
+			size += len(group)
+		}
+		flat := make([]set.Brick, 0, size)
+		for _, group := range batch {
+			flat = append(flat, group...)
+		}
+		return h.batchHandlerBricksProgress(rs, flat, bprogress, DataTypePickabrickBricks, true)
 	}
 
 	// Create and run pool with batching
@@ -409,7 +430,7 @@ func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, locale langua
 	})
 
 	// Process all price jobs
-	if err := pool.Process(rs.bricks.getMissingAsSlice()); err != nil {
+	if err := pool.Process(jobs); err != nil {
 		handleFatalError(h, rs, set.FetchErrorBatchCache, DataTypeSet, err, "Failed to process prices with worker pool")
 		return err
 	}
@@ -417,66 +438,236 @@ func (h *Handler) fetchBricks(ctx context.Context, rs *RuntimeSet, locale langua
 	rs.cacheSet(ctx, true)
 	zap.L().Debug("Worker pool completed price fetching",
 		zap.Int("bricks_size", bricksSize),
+		zap.Int("design_jobs", len(jobs)),
 	)
 
 	return nil
 }
 
-// prefetchDesignPrices warms the Pick-a-Brick price cache for all missing bricks by
-// grouping them by design ID and issuing one FetchBricksByDesignID request per unique
-// design. Each such request caches every element (all colors) of the design, so the
-// subsequent per-brick worker pool resolves prices from cache instead of issuing one
-// request per element.
-//
-// Measurement: it logs the number of missing bricks (the previous worst-case request
-// count, one per element) against the number of design requests actually issued. Any
-// residual per-element requests still appear in the "Fetching Pick-a-Brick element by
-// brick ID" debug logs from FetchBricksByBrickID.
-func (h *Handler) prefetchDesignPrices(ctx context.Context, rs *RuntimeSet, locale language.Tag) {
-	missing := rs.bricks.getMissingAsSlice()
+// groupBricksByDesign groups bricks by their first non-empty design ID. Bricks
+// without any design ID each get an individual job with an empty designID, which
+// skips the design fetch and falls back to per-element resolution.
+func groupBricksByDesign(bricks []set.Brick) []designJob {
+	byDesign := make(map[brick.DesignID][]set.Brick)
+	var noDesign []set.Brick
 
-	// Collect unique design IDs across all missing bricks (a brick may carry several
-	// IDs for alternate designs).
-	designIDs := make(map[brick.DesignID]struct{})
-	for _, b := range missing {
+	for _, b := range bricks {
+		var designID brick.DesignID
 		for _, id := range b.Locale.IDs {
 			if strings.TrimSpace(string(id.DesignID)) != "" {
-				designIDs[id.DesignID] = struct{}{}
+				designID = id.DesignID
+				break
 			}
 		}
-	}
+		// Fall back to the main ID's design (Rebrickable bricks without an element
+		// ID have an empty IDs slice but still carry a design on the main ID).
+		if designID == "" && b.Locale.ID != nil {
+			if strings.TrimSpace(string(b.Locale.ID.DesignID)) != "" {
+				designID = b.Locale.ID.DesignID
+			}
+		}
 
-	if len(designIDs) == 0 {
-		return
-	}
-
-	zap.L().Debug("Prefetching Pick-a-Brick prices grouped by design",
-		zap.Int("missing_bricks", len(missing)),
-		zap.Int("unique_designs", len(designIDs)),
-	)
-
-	designRequests := 0
-	elementsCached := 0
-	for designID := range designIDs {
-		count, err := brick.PrefetchDesignBricks(ctx, designID, locale)
-		designRequests++
-		if err != nil {
-			h.logWarning(rs.Read().ID, "Prefetch.DesignPrices", err)
-			zap.L().Warn("Failed to prefetch design prices",
-				zap.Error(err),
-				zap.String("design_id", string(designID)),
-			)
+		if designID == "" {
+			noDesign = append(noDesign, b)
 			continue
 		}
-		elementsCached += count
+		byDesign[designID] = append(byDesign[designID], b)
 	}
 
-	zap.L().Info("Completed Pick-a-Brick design prefetch",
-		zap.String("set_id", rs.Read().ID.String()),
-		zap.Int("missing_bricks", len(missing)),
-		zap.Int("design_requests", designRequests),
-		zap.Int("elements_cached", elementsCached),
-	)
+	jobs := make([]designJob, 0, len(byDesign)+len(noDesign))
+	for designID, group := range byDesign {
+		jobs = append(jobs, designJob{designID: designID, bricks: group})
+	}
+	for _, b := range noDesign {
+		jobs = append(jobs, designJob{bricks: []set.Brick{b}})
+	}
+	return jobs
+}
+
+// workerHandlerDesignPrices resolves all bricks of one design group. It first tries
+// the cache for every brick; only when at least one brick is unresolved does it issue
+// the single design-level Pick-a-Brick request (which caches every color), then
+// resolves the remaining bricks through the standard per-brick path (cache first,
+// per-element fallback).
+func (h *Handler) workerHandlerDesignPrices(ctx context.Context, job designJob, locale language.Tag) ([]set.Brick, error) {
+	resolved := make([]set.Brick, 0, len(job.bricks))
+	var pending []set.Brick
+
+	// Cache-only pass: skip the design fetch entirely on a warm cache
+	for _, b := range job.bricks {
+		if rb, ok := resolveBrickFromCache(ctx, b, locale); ok {
+			resolved = append(resolved, rb)
+		} else {
+			pending = append(pending, b)
+		}
+	}
+
+	// Warm the cache with a single design-level request covering all colors
+	if len(pending) > 0 && job.designID != "" {
+		if _, err := brick.PrefetchDesignBricks(ctx, job.designID, locale); err != nil {
+			zap.L().Warn("Failed to prefetch design prices",
+				zap.Error(err),
+				zap.String("design_id", string(job.designID)),
+			)
+			// Not fatal: the per-brick path below still resolves via per-element requests
+		}
+	}
+
+	// Standard per-brick resolution (cache now warm; per-element API fallback)
+	for _, b := range pending {
+		rb, err := h.workerHandlerBrickPrice(ctx, b, locale)
+		if err != nil {
+			zap.L().Warn("Failed to resolve brick price",
+				zap.Error(err),
+				zap.String("design_id", string(job.designID)),
+			)
+			// Keep the unresolved brick so progress accounting stays exact
+		}
+		resolved = append(resolved, rb)
+	}
+
+	// Sibling-element fallback: the inventory line carries a single element ID which
+	// may be retired on Pick-a-Brick while another element of the same part+color is
+	// still purchasable. Applies to every brick without a purchasable price — whether
+	// it came back from the cache (cached not-found) or from the fetch above (price
+	// left zero when the element is unknown to Pick-a-Brick).
+	for i, rb := range resolved {
+		if !rb.IsCustom && !rb.HasValidPrice() {
+			resolved[i] = h.resolveViaAlternateElements(ctx, rb, locale)
+		}
+	}
+
+	return resolved, nil
+}
+
+// resolveViaAlternateElements tries to price a brick through the other element IDs
+// known for its part+color. A part+color often has several element IDs over time
+// (mold/re-release changes); the set inventory carries only one, which may be retired
+// on Pick-a-Brick while a sibling element is still purchasable. Returns the updated
+// brick (unchanged when no sibling resolves).
+func (h *Handler) resolveViaAlternateElements(ctx context.Context, bSet set.Brick, locale language.Tag) set.Brick {
+	designID := ""
+	if bSet.Locale.ID != nil {
+		designID = string(bSet.Locale.ID.DesignID)
+	}
+	if designID == "" {
+		return bSet
+	}
+
+	elements, err := rebrickable.C().FetchPartColorElements(designID, bSet.Inventory.ColorID)
+	if err != nil {
+		if !errors.Is(err, rebrickable.ErrPartNotFound) {
+			zap.L().Warn("Failed to fetch alternate elements from Rebrickable",
+				zap.Error(err),
+				zap.String("design_id", designID),
+				zap.Int("color_id", bSet.Inventory.ColorID),
+			)
+		}
+		return bSet
+	}
+
+	// Already-tried element IDs (the inventory's own IDs)
+	tried := make(map[brick.ElementID]struct{}, len(bSet.Locale.IDs))
+	for _, id := range bSet.Locale.IDs {
+		tried[id.ElementID] = struct{}{}
+	}
+
+	originalIDs := bSet.Locale.IDs
+	for _, el := range elements {
+		elementID := brick.ElementID(el)
+		if _, done := tried[elementID]; done || el == "" {
+			continue
+		}
+
+		// Cache first (the design-level fetch may already have cached this sibling)
+		bRedis, valid, _ := bSet.Locale.LoadFromRedis(ctx, elementID, locale, false, true)
+		if valid {
+			bSet = set.NewBrickWithUUID(bSet.UUID, bSet.Inventory, bRedis)
+			h.aliasResolvedLocale(ctx, bSet.Locale, originalIDs, locale)
+			bSet.SetIDs(originalIDs)
+			return bSet
+		}
+
+		// Then Pick-a-Brick
+		ok, fetchValid, _ := bSet.Locale.Fetch(ctx, elementID, locale)
+		if ok && fetchValid {
+			zap.L().Debug("Resolved brick via alternate element ID",
+				zap.String("design_id", designID),
+				zap.String("element_id", el),
+			)
+			h.aliasResolvedLocale(ctx, bSet.Locale, originalIDs, locale)
+			bSet.SetIDs(originalIDs)
+			return bSet
+		}
+	}
+
+	return bSet
+}
+
+// aliasResolvedLocale caches a sibling-resolved locale under the inventory's original
+// element IDs. Without this, the original IDs keep their cached not-found entries and
+// every subsequent fetch would re-run the sibling fallback (or worse, surface the
+// brick as missing again when resolved from cache).
+func (h *Handler) aliasResolvedLocale(ctx context.Context, resolved brick.Locale, originalIDs []brick.ID, locale language.Tag) {
+	resolvedElement := brick.ElementID("")
+	if resolved.ID != nil {
+		resolvedElement = resolved.ID.ElementID
+	}
+	for _, id := range originalIDs {
+		if id.ElementID == "" || id.ElementID == resolvedElement {
+			continue
+		}
+		if err := brick.RedisSetLocaleForElement(ctx, id.ElementID, resolved, locale, true); err != nil {
+			zap.L().Warn("Failed to alias resolved locale under original element ID",
+				zap.Error(err),
+				zap.String("original_element_id", string(id.ElementID)),
+				zap.String("resolved_element_id", string(resolvedElement)),
+			)
+		}
+	}
+}
+
+// resolveBrickFromCache attempts to fully resolve a brick's price from the cache
+// without any API call. It mirrors the cache portion of workerHandlerBrickPrice:
+// a brick resolves when every one of its element IDs yields a valid or not-found
+// cache entry. Returns the updated brick and whether it resolved.
+func resolveBrickFromCache(ctx context.Context, bSet set.Brick, locale language.Tag) (set.Brick, bool) {
+	originalIDs := bSet.Locale.IDs
+	if len(originalIDs) == 0 {
+		return bSet, false
+	}
+
+	var firstNotFoundLocale *brick.Locale
+	var validLocale bool
+
+	for _, id := range originalIDs {
+		bRedis, valid, notFound := bSet.Locale.LoadFromRedis(ctx, id.ElementID, locale, false, true)
+		if notFound {
+			if firstNotFoundLocale == nil {
+				l := bRedis
+				firstNotFoundLocale = &l
+			}
+			continue
+		}
+		if valid {
+			bSet = set.NewBrickWithUUID(bSet.UUID, bSet.Inventory, bRedis)
+			validLocale = true
+			continue
+		}
+		// Cache miss for this ID: cannot fully resolve from cache
+		return bSet, false
+	}
+
+	if validLocale {
+		bSet.SetIDs(originalIDs)
+		return bSet, true
+	}
+	if firstNotFoundLocale != nil {
+		bSet = set.NewBrickWithUUID(bSet.UUID, bSet.Inventory, *firstNotFoundLocale)
+		bSet.SetIDs(originalIDs)
+		return bSet, true
+	}
+	return bSet, false
 }
 
 // workerHandlerBrickPrice is the worker function for fetching and updating a single brick's price, with cache checking and fallback to API

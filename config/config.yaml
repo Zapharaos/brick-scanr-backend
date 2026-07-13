@@ -267,6 +267,51 @@ setruntime:
 # API client rate limiting and retry configuration
 api_clients:
 
+  # Rebrickable API client configuration.
+  # Source of truth for set inventories (parts, colors, quantities and LEGO
+  # element IDs). See https://rebrickable.com/api/
+  rebrickable:
+
+    # Base URL for the Rebrickable REST API v3.
+    # Default value: "https://rebrickable.com/api/v3"
+    api_base_url: "https://rebrickable.com/api/v3"
+
+    # API key. Leave EMPTY in the repo. Provide it at runtime via the environment
+    # variable BRICK_SCANR_API_CLIENTS_REBRICKABLE_API_KEY (it is a secret).
+    api_key: ""
+
+    # Random delay range between requests in milliseconds
+    delay_min_ms: 100
+    delay_max_ms: 300
+
+    # Maximum requests per time window (throttle).
+    # Rebrickable is permissive; keep a conservative window to stay well-behaved.
+    # Default value: 60 requests per 60 seconds
+    max_requests: 60
+    window_seconds: 60
+
+    # Retry configuration
+    retry:
+      max_attempts: 3
+      initial_backoff_ms: 1000
+      max_backoff_ms: 30000
+      backoff_multiplier: 2.0
+
+    # Enable setting a User-Agent header on outgoing requests at all
+    user_agent_enabled: true
+
+    # Rotate through the user agents list on each request
+    user_agent_rotation: false
+
+    # User agents list (leave empty to use OS-appropriate defaults)
+    user_agents: []
+
+    # Adaptive rate limiting (monitors response times and adjusts automatically)
+    adaptive:
+      enabled: true
+      baseline_response_time_ms: 300
+      slow_threshold_multiplier: 3.0
+
   # Pick-a-Brick API client configuration
   pickabrick:
 
