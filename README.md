@@ -1,3 +1,5 @@
+**Frontend:** [brick-scout-ui](https://github.com/Zapharaos/brick-scout-ui)
+
 ![GitHub Release](https://img.shields.io/github/v/release/Zapharaos/brick-scanr-backend)
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/Zapharaos/brick-scanr-backend/golang.yml)
 [![codecov](https://codecov.io/gh/Zapharaos/brick-scanr-backend/graph/badge.svg?token=BL7YP0GTK9)](https://codecov.io/gh/Zapharaos/brick-scanr-backend)
@@ -25,8 +27,8 @@ The backend service provides:
 
 Built with modern Go technologies and best practices:
 
-- **Go 1.24** - High-performance compiled language
-- **Gin** - Fast HTTP web framework
+- **Go 1.25** - High-performance compiled language
+- **Chi** - Lightweight HTTP router
 - **Redis** - In-memory caching and distributed locking
 - **Viper** - Configuration management
 - **Zap** - Structured, high-performance logging
@@ -45,15 +47,7 @@ Built with modern Go technologies and best practices:
 
 ### Prerequisites
 
-- **Go**: 1.24 or higher
-- **Docker**: 20.x or higher (for containerized deployment)
-- **Docker Compose**: 2.x or higher
-- **Make**: For build automation (optional but recommended)
-- **Redis**: 7.x or higher (included in Docker setup)
-
-### Prerequisites
-
-- **Go**: 1.24 or higher
+- **Go**: 1.25 or higher
 - **Docker**: 20.x or higher (for containerized deployment)
 - **Docker Compose**: 2.x or higher
 - **Make**: For build automation (optional but recommended)
@@ -117,8 +111,6 @@ docker compose up
 **Configuration:** Set your environment in `.env` file (see `.env.example`).
 
 ---
-
-## 💻 Development
 
 ### Development (without Docker)
 
@@ -259,7 +251,7 @@ Copyright (c) 2026 Matthieu FREITAG
 ## 📚 Additional Resources
 
 - [Go Documentation](https://go.dev/doc/)
-- [Gin Web Framework](https://gin-gonic.com/docs/)
+- [Chi Router](https://github.com/go-chi/chi)
 - [Redis Documentation](https://redis.io/docs/)
 - [Viper Configuration](https://github.com/spf13/viper)
 - [Zap Logging](https://github.com/uber-go/zap)

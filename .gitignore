@@ -38,3 +38,5 @@ docker-compose.prod.yml
 # Editor/IDE
 .idea/
 .vscode/
+
+nginx-*.conf
